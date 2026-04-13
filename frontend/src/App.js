@@ -1,39 +1,28 @@
 import { useState, useEffect, useRef } from "react";
 import "./App.css";
 import axios from "axios";
-import jsPDF from "jspdf";
-import "jspdf-autotable";
+import html2pdf from "html2pdf.js";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const STEP_LABELS = [
-  "Company analysis",
-  "Competitor identification",
-  "Positioning comparison",
-  "Gap identification",
-  "Strategy engine",
-  "Target account generation"
+  { name: "Company Analysis", desc: "Reading your site & extracting profile" },
+  { name: "Competitor Identification", desc: "Finding 5–7 real competitors" },
+  { name: "Positioning Comparison", desc: "Mapping you vs them" },
+  { name: "Gap Identification", desc: "Finding strategic opportunities" },
+  { name: "Strategy Engine", desc: "Producing the decision" },
+  { name: "Target Accounts + Battlecards", desc: "Generating accounts & battlecards" }
 ];
 
-// Helper function to format ARR values
-const formatARR = (value) => {
-  if (!value) return "—";
-  
-  // Extract numbers from string
-  const numMatch = value.match(/[\d,]+/);
-  if (!numMatch) return value;
-  
-  const num = parseInt(numMatch[0].replace(/,/g, ''));
-  
-  if (num >= 1000000) {
-    return `$${(num / 1000000).toFixed(1)}M ARR`;
-  } else if (num >= 1000) {
-    return `$${(num / 1000).toFixed(0)}K ARR`;
-  }
-  
-  return `$${num} ARR`;
-};
+const STATUS_MSGS = [
+  'Reading website content…',
+  'Finding your real competitors…',
+  'Mapping positioning matrices…',
+  'Hunting for strategic gaps…',
+  'Running the strategy engine…',
+  'Generating accounts & battlecards…'
+];
 
 function App() {
   const [screen, setScreen] = useState("home"); // home | loading | results
@@ -44,12 +33,27 @@ function App() {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [battlecardData, setBattlecardData] = useState(null);
+  const [loadElapsed, setLoadElapsed] = useState(0);
+  const [statusMsg, setStatusMsg] = useState("Warming up…");
   const [showBattlecard, setShowBattlecard] = useState(false);
-  const [loadingBattlecard, setLoadingBattlecard] = useState(false);
+  const [battlecardData, setBattlecardData] = useState(null);
+  
   const pollingRef = useRef(null);
+  const elapsedTimerRef = useRef(null);
 
-  // Start analysis
+  const goHome = () => {
+    stopPolling();
+    setScreen("home");
+    setUrl("");
+    setJobId(null);
+    setCurrentStep(0);
+    setResult(null);
+    setError(null);
+    setActiveTab("overview");
+    setIsSubmitting(false);
+    setLoadElapsed(0);
+  };
+
   const startAnalysis = async () => {
     if (!url.trim()) return;
     
@@ -57,12 +61,20 @@ function App() {
     setError(null);
     
     try {
-      const response = await axios.post(`${API}/analyse`, { url });
+      const response = await axios.post(`${API}/analyse`, { url: url.trim() });
       const { job_id } = response.data;
       
       setJobId(job_id);
       setScreen("loading");
       setCurrentStep(0);
+      setLoadElapsed(0);
+      setStatusMsg(STATUS_MSGS[0]);
+      
+      // Start elapsed timer
+      const startTime = Date.now();
+      elapsedTimerRef.current = setInterval(() => {
+        setLoadElapsed(Math.floor((Date.now() - startTime) / 1000));
+      }, 250);
       
       // Start polling
       startPolling(job_id);
@@ -71,7 +83,6 @@ function App() {
       const errorDetail = err.response?.data?.detail || "";
       let userMessage = "Failed to start analysis";
       
-      // Show user-friendly message for scraping errors
       if (errorDetail.includes("scrape_failed") || errorDetail.includes("Could not reach")) {
         userMessage = "We couldn't read this URL — it may require a login or block automated access. Try your main public-facing homepage (e.g. yourcompany.com, not app.yourcompany.com).";
       } else if (errorDetail.includes("invalid_url")) {
@@ -85,7 +96,6 @@ function App() {
     }
   };
 
-  // Poll for job status
   const startPolling = (jobId) => {
     pollingRef.current = setInterval(async () => {
       try {
@@ -93,16 +103,25 @@ function App() {
         const data = response.data;
         
         if (data.status === "running") {
-          setCurrentStep(data.current_step || 0);
+          const step = data.current_step || 0;
+          setCurrentStep(step);
+          if (step > 0 && step <= 6) {
+            setStatusMsg(STATUS_MSGS[step - 1]);
+          }
         } else if (data.status === "complete") {
-          setResult(data.result);
-          setScreen("results");
           stopPolling();
+          clearInterval(elapsedTimerRef.current);
+          setStatusMsg("Analysis complete.");
+          setTimeout(() => {
+            setResult(data.result);
+            setScreen("results");
+          }, 600);
         } else if (data.status === "failed") {
+          stopPolling();
+          clearInterval(elapsedTimerRef.current);
           const errorDetail = data.error || "Analysis failed";
           let userMessage = errorDetail;
           
-          // Show user-friendly message for scraping errors
           if (errorDetail.includes("scrape_failed") || errorDetail.includes("Could not reach")) {
             userMessage = "We couldn't read this URL — it may require a login or block automated access. Try your main public-facing homepage (e.g. yourcompany.com, not app.yourcompany.com).";
           } else if (errorDetail.includes("openai")) {
@@ -111,12 +130,11 @@ function App() {
           
           setError(userMessage);
           setScreen("home");
-          stopPolling();
         }
       } catch (err) {
         console.error("Polling error:", err);
       }
-    }, 2000); // Poll every 2 seconds
+    }, 2000);
   };
 
   const stopPolling = () => {
@@ -124,718 +142,542 @@ function App() {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
     }
+    if (elapsedTimerRef.current) {
+      clearInterval(elapsedTimerRef.current);
+      elapsedTimerRef.current = null;
+    }
   };
 
-  // Cleanup polling on unmount
   useEffect(() => {
     return () => stopPolling();
   }, []);
 
-  const resetApp = () => {
-    stopPolling();
-    setScreen("home");
-    setUrl("");
-    setJobId(null);
-    setCurrentStep(0);
-    setResult(null);
-    setError(null);
-    setActiveTab("overview");
-    setIsSubmitting(false);
+  const switchTab = (name) => {
+    setActiveTab(name);
   };
 
-  const exportToPDF = () => {
+  const openBattlecard = (competitorIndex) => {
+    const competitor = result?.competitors?.[competitorIndex];
+    if (!competitor) return;
+
+    // Check if battlecards data exists
+    if (result?.battlecards && result.battlecards[competitorIndex]) {
+      setBattlecardData({
+        competitor: competitor,
+        battlecard: result.battlecards[competitorIndex]
+      });
+    } else {
+      // Show placeholder
+      setBattlecardData({
+        competitor: competitor,
+        battlecard: null
+      });
+    }
+    setShowBattlecard(true);
+  };
+
+  const closeBattlecard = () => {
+    setShowBattlecard(false);
+    setBattlecardData(null);
+  };
+
+  // Export PDF function - builds print-safe DOM
+  const exportPDF = () => {
     if (!result) return;
 
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 15;
-    let yPos = 20;
+    const p = result.company_profile;
+    const s = result.strategy;
 
-    // Helper to add new page if needed
-    const checkPageBreak = (requiredSpace = 20) => {
-      if (yPos + requiredSpace > doc.internal.pageSize.getHeight() - 20) {
-        doc.addPage();
-        yPos = 20;
-        return true;
-      }
-      return false;
+    // Build offscreen print container
+    const printEl = document.createElement('div');
+    printEl.id = 'pdf-export-root';
+    printEl.style.cssText = 'position:fixed;top:0;left:-9999px;width:780px;background:#fbf9fa;padding:40px;font-family:Geist,sans-serif;color:#1b1c1d';
+
+    const accountCards = result.target_accounts?.map(a => `
+      <div style="background:#fff;border:1px solid rgba(200,196,212,0.35);border-radius:12px;padding:18px 22px;margin-bottom:10px;page-break-inside:avoid">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:10px">
+          <div>
+            <div style="font-family:'Instrument Serif',serif;font-size:22px;letter-spacing:-0.02em;line-height:1.1;margin-bottom:2px">${a.company}</div>
+            <div style="font-family:'Geist Mono',monospace;font-size:10px;color:#7c7b83;letter-spacing:0.08em;text-transform:uppercase">${a.country}</div>
+          </div>
+          <div style="background:#E1F5EE;color:#006e20;padding:5px 10px;border-radius:6px;font-family:'Geist Mono',monospace;font-size:11px;font-weight:500;white-space:nowrap">${a.deal_potential_arr}</div>
+        </div>
+        <div style="font-size:13px;color:#47464f;line-height:1.55;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid rgba(200,196,212,0.35)">${a.why_relevant}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+          <div style="background:#fbf9fa;padding:9px 11px;border-radius:6px">
+            <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#7c7b83;text-transform:uppercase;margin-bottom:4px">Risk</div>
+            <div style="color:#47464f;line-height:1.45">${a.risk}</div>
+          </div>
+          <div style="background:rgba(87,78,177,0.06);border-left:3px solid #574eb1;padding:9px 11px;border-radius:6px">
+            <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#574eb1;text-transform:uppercase;margin-bottom:4px">◆ Signal</div>
+            <div style="color:#1b1c1d;font-weight:500;line-height:1.45">${a.timing_signal}</div>
+          </div>
+          <div style="grid-column:1/-1;background:#fbf9fa;padding:9px 11px;border-radius:6px">
+            <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#7c7b83;text-transform:uppercase;margin-bottom:4px">Approach</div>
+            <div style="color:#47464f;line-height:1.45">${a.approach}</div>
+          </div>
+        </div>
+      </div>`).join('') || '';
+
+    const compRows = result.competitors?.map(c => `
+      <tr>
+        <td style="padding:10px 12px;font-family:'Geist Mono',monospace;font-size:11px;border-bottom:1px solid rgba(200,196,212,0.35)">${c.name}</td>
+        <td style="padding:10px 12px;font-size:12px;color:#47464f;border-bottom:1px solid rgba(200,196,212,0.35)">${c.target_segment}</td>
+        <td style="padding:10px 12px;font-size:12px;color:#47464f;border-bottom:1px solid rgba(200,196,212,0.35)">${c.price_range}</td>
+        <td style="padding:10px 12px;font-size:12px;color:#47464f;border-bottom:1px solid rgba(200,196,212,0.35)">${c.positioning}</td>
+      </tr>`).join('') || '';
+
+    const actions = s.ninety_day_actions?.map(a => `
+      <div style="display:flex;gap:12px;align-items:baseline;padding:6px 0">
+        <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#AFA9EC;min-width:20px">0${a.priority}</span>
+        <span style="font-size:13px;color:#D3D1C7">${a.action}</span>
+      </div>`).join('') || '';
+
+    printEl.innerHTML = `
+      <!-- Header -->
+      <div style="border-bottom:2px solid #1b1c1d;padding-bottom:16px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-end">
+        <div>
+          <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#574eb1;margin-bottom:6px">RIVALIQ · GTM STRATEGY REPORT</div>
+          <div style="font-family:'Instrument Serif',serif;font-size:38px;letter-spacing:-0.02em;line-height:1">${p.company_name}</div>
+          <div style="font-family:'Geist Mono',monospace;font-size:10px;color:#7c7b83;letter-spacing:0.1em;margin-top:4px;text-transform:uppercase">${result.url.replace(/https?:\/\//,'')} · ${p.industry}</div>
+        </div>
+        <div style="text-align:right;font-family:'Geist Mono',monospace;font-size:10px;color:#7c7b83;letter-spacing:0.05em">Generated ${new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</div>
+      </div>
+
+      <!-- Company Snapshot -->
+      <div style="margin-bottom:28px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#7c7b83;text-transform:uppercase;margin-bottom:12px">Company Snapshot</div>
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td style="padding:10px 14px;background:#fff;border:1px solid rgba(200,196,212,0.35);width:33%;vertical-align:top"><div style="font-family:'Geist Mono',monospace;font-size:9px;color:#7c7b83;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:5px">Product</div><div style="font-size:13px;font-weight:500">${p.product}</div></td>
+            <td style="padding:10px 14px;background:#fff;border:1px solid rgba(200,196,212,0.35);width:33%;vertical-align:top"><div style="font-family:'Geist Mono',monospace;font-size:9px;color:#7c7b83;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:5px">Target</div><div style="font-size:13px;font-weight:500">${p.target_customer}</div></td>
+            <td style="padding:10px 14px;background:#fff;border:1px solid rgba(200,196,212,0.35);width:33%;vertical-align:top"><div style="font-family:'Geist Mono',monospace;font-size:9px;color:#7c7b83;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:5px">Pricing</div><div style="font-size:13px;font-weight:500">${p.pricing_model}</div></td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- THE DECISION (dark card) -->
+      <div style="background:#0f0f10;color:#fff;border-radius:14px;padding:28px 32px;margin-bottom:28px;page-break-inside:avoid">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:20px">
+          <div>
+            <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#AFA9EC;margin-bottom:4px">THE DECISION · STRATEGY ENGINE V1</div>
+            <div style="font-family:'Instrument Serif',serif;font-size:26px;letter-spacing:-0.02em">Your GTM call.</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.12em;color:#888780;margin-bottom:2px">CONFIDENCE</div>
+            <div style="font-family:'Geist Mono',monospace;font-size:22px;color:#5DCAA5;font-weight:500">${s.confidence}%</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:110px 1fr;gap:20px 24px;margin-bottom:20px">
+          <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#888780;padding-top:6px">WHERE TO PLAY</div>
+          <div>
+            <div style="font-family:'Instrument Serif',serif;font-size:24px;letter-spacing:-0.02em;line-height:1.15;margin-bottom:6px">${s.where_to_play.segment}, <em style="color:#AFA9EC;font-style:italic">${s.where_to_play.geography}</em></div>
+            <div style="font-size:12.5px;color:#B4B2A9;line-height:1.55">${s.where_to_play.why}</div>
+          </div>
+          <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#888780;padding-top:6px">HOW TO WIN</div>
+          <div>
+            <div style="font-family:'Instrument Serif',serif;font-size:22px;letter-spacing:-0.02em;line-height:1.15;margin-bottom:6px">${s.how_to_win.differentiation}</div>
+            <div style="font-size:12.5px;color:#B4B2A9;line-height:1.55">"${s.how_to_win.positioning_statement}"</div>
+          </div>
+        </div>
+        <div style="background:rgba(127,119,221,0.12);padding:16px 20px;border-radius:10px">
+          <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#AFA9EC;margin-bottom:10px">◆ 90-DAY ACTION PLAN</div>
+          ${actions}
+        </div>
+      </div>
+
+      <!-- Strategic Gaps -->
+      <div style="margin-bottom:28px;page-break-inside:avoid">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#7c7b83;text-transform:uppercase;margin-bottom:12px">Strategic Gaps</div>
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td style="width:33.33%;vertical-align:top;padding-right:6px">
+              <div style="background:#fff;border:1px solid rgba(200,196,212,0.35);border-radius:10px;padding:16px">
+                <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;color:#A32D2D;margin-bottom:10px;text-transform:uppercase">⚠ Weaknesses</div>
+                ${result.gaps.weaknesses?.map(w=>`<div style="font-size:12px;color:#47464f;padding:5px 0;line-height:1.5">• ${w.area}</div>`).join('') || ''}
+              </div>
+            </td>
+            <td style="width:33.33%;vertical-align:top;padding:0 3px">
+              <div style="background:#fff;border:1px solid rgba(200,196,212,0.35);border-radius:10px;padding:16px">
+                <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;color:#574eb1;margin-bottom:10px;text-transform:uppercase">⚡ Overcrowded</div>
+                ${result.gaps.overcrowded_areas?.map(c=>`<div style="font-size:12px;color:#47464f;padding:5px 0;line-height:1.5">• ${c.area}</div>`).join('') || ''}
+              </div>
+            </td>
+            <td style="width:33.33%;vertical-align:top;padding-left:6px">
+              <div style="background:#fff;border:1px solid rgba(200,196,212,0.35);border-radius:10px;padding:16px">
+                <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;color:#006e20;margin-bottom:10px;text-transform:uppercase">✦ Opportunity</div>
+                ${result.gaps.underserved_opportunities?.map(o=>`<div style="font-size:12px;color:#47464f;padding:5px 0;line-height:1.5">• ${o.opportunity}</div>`).join('') || ''}
+              </div>
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- Competitor Comparison -->
+      <div style="margin-bottom:28px;page-break-before:always">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#7c7b83;text-transform:uppercase;margin-bottom:12px">Competitor Landscape</div>
+        <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid rgba(200,196,212,0.35);border-radius:10px;overflow:hidden">
+          <thead>
+            <tr style="background:#fbf9fa">
+              <th style="padding:10px 12px;text-align:left;font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#7c7b83;text-transform:uppercase;border-bottom:1px solid rgba(200,196,212,0.35)">Company</th>
+              <th style="padding:10px 12px;text-align:left;font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#7c7b83;text-transform:uppercase;border-bottom:1px solid rgba(200,196,212,0.35)">ICP</th>
+              <th style="padding:10px 12px;text-align:left;font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#7c7b83;text-transform:uppercase;border-bottom:1px solid rgba(200,196,212,0.35)">Price</th>
+              <th style="padding:10px 12px;text-align:left;font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.1em;color:#7c7b83;text-transform:uppercase;border-bottom:1px solid rgba(200,196,212,0.35)">Core message</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="background:#eeedfe">
+              <td style="padding:10px 12px;font-family:'Geist Mono',monospace;font-size:11px;color:#574eb1;font-weight:500;border-bottom:1px solid rgba(200,196,212,0.35)">${p.company_name.toUpperCase()} ★</td>
+              <td style="padding:10px 12px;font-size:12px;color:#1b1c1d;font-weight:500;border-bottom:1px solid rgba(200,196,212,0.35)">${result.comparison.subject?.icp || ''}</td>
+              <td style="padding:10px 12px;font-size:12px;color:#1b1c1d;font-weight:500;border-bottom:1px solid rgba(200,196,212,0.35)">${result.comparison.subject?.price_positioning || ''}</td>
+              <td style="padding:10px 12px;font-size:12px;color:#1b1c1d;font-weight:500;border-bottom:1px solid rgba(200,196,212,0.35)">${result.comparison.subject?.core_message || ''}</td>
+            </tr>
+            ${compRows}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Target Accounts -->
+      <div style="margin-bottom:20px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.14em;color:#7c7b83;text-transform:uppercase;margin-bottom:12px">Target Accounts · ${result.target_accounts?.length || 0} Identified</div>
+        ${accountCards}
+      </div>
+
+      <!-- Footer -->
+      <div style="margin-top:30px;padding-top:16px;border-top:1px solid rgba(200,196,212,0.35);display:flex;justify-content:space-between;font-family:'Geist Mono',monospace;font-size:9px;color:#7c7b83;letter-spacing:0.08em;text-transform:uppercase">
+        <span>RivalIQ · GTM Strategy Report</span>
+        <span>${new Date().toLocaleDateString('en-GB')}</span>
+      </div>
+    `;
+
+    document.body.appendChild(printEl);
+
+    const opt = {
+      margin: [10, 10, 10, 10],
+      filename: `RivalIQ_${p.company_name.replace(/\s+/g, '_')}_Strategy.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#fbf9fa', logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
     };
 
-    // Title
-    doc.setFontSize(24);
-    doc.setTextColor(87, 78, 177); // Primary color
-    doc.text("RivalIQ Strategy Report", margin, yPos);
-    yPos += 10;
+    const cleanup = () => {
+      if (printEl.parentNode) printEl.parentNode.removeChild(printEl);
+    };
 
-    // Company name and date
-    doc.setFontSize(12);
-    doc.setTextColor(0, 0, 0);
-    doc.text(result.company_profile?.company_name || "Company", margin, yPos);
-    yPos += 6;
-    doc.setFontSize(10);
-    doc.setTextColor(100, 100, 100);
-    doc.text(new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), margin, yPos);
-    yPos += 15;
-
-    // Company Snapshot
-    checkPageBreak(40);
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Company Snapshot", margin, yPos);
-    yPos += 8;
-
-    const cp = result.company_profile;
-    const snapshotData = [
-      ["Product", cp?.product || "—"],
-      ["Target Customer", cp?.target_customer || "—"],
-      ["Pricing Model", cp?.pricing_model || "—"],
-      ["Positioning", cp?.positioning || "—"],
-      ["Industry", cp?.industry || "—"]
-    ];
-
-    doc.autoTable({
-      startY: yPos,
-      head: [],
-      body: snapshotData,
-      theme: 'plain',
-      styles: { fontSize: 9, cellPadding: 3 },
-      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
-    });
-    yPos = doc.lastAutoTable.finalY + 12;
-
-    // Strategic Gaps
-    checkPageBreak(40);
-    doc.setFontSize(14);
-    doc.text("Strategic Gaps", margin, yPos);
-    yPos += 8;
-
-    if (result.gaps?.underserved_opportunities?.length > 0) {
-      doc.setFontSize(11);
-      doc.setTextColor(0, 110, 32);
-      doc.text("Opportunities", margin, yPos);
-      yPos += 6;
-      doc.setFontSize(9);
-      doc.setTextColor(0, 0, 0);
-      result.gaps.underserved_opportunities.forEach((opp, i) => {
-        checkPageBreak(10);
-        doc.text(`${i + 1}. ${opp.opportunity}`, margin + 3, yPos);
-        yPos += 5;
+    html2pdf().set(opt).from(printEl).save()
+      .then(cleanup)
+      .catch(err => {
+        console.error('PDF export failed:', err);
+        cleanup();
+        alert('PDF export failed. Check console for details.');
       });
-      yPos += 5;
-    }
 
-    // Competitors Table
-    checkPageBreak(40);
-    doc.setFontSize(14);
-    doc.text("Competitors", margin, yPos);
-    yPos += 8;
-
-    const compData = result.competitors?.map(c => [
-      c.name,
-      c.target_segment,
-      c.price_range,
-      c.positioning
-    ]) || [];
-
-    doc.autoTable({
-      startY: yPos,
-      head: [['Company', 'Target Segment', 'Price Range', 'Positioning']],
-      body: compData,
-      theme: 'grid',
-      styles: { fontSize: 8, cellPadding: 3 },
-      headStyles: { fillColor: [87, 78, 177], textColor: 255 }
-    });
-    yPos = doc.lastAutoTable.finalY + 12;
-
-    // Strategy
-    doc.addPage();
-    yPos = 20;
-    doc.setFontSize(16);
-    doc.setTextColor(87, 78, 177);
-    doc.text("GTM STRATEGY", margin, yPos);
-    yPos += 10;
-
-    const strat = result.strategy;
-    doc.setFontSize(11);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Where to Play", margin, yPos);
-    yPos += 6;
-    doc.setFontSize(9);
-    doc.setTextColor(50, 50, 50);
-    const whereText = `${strat?.where_to_play?.segment}, ${strat?.where_to_play?.geography}`;
-    doc.text(whereText, margin + 3, yPos, { maxWidth: pageWidth - 2 * margin });
-    yPos += 10;
-
-    doc.setFontSize(11);
-    doc.setTextColor(0, 0, 0);
-    doc.text("How to Win", margin, yPos);
-    yPos += 6;
-    doc.setFontSize(9);
-    doc.setTextColor(50, 50, 50);
-    const howText = strat?.how_to_win?.differentiation || "—";
-    doc.text(howText, margin + 3, yPos, { maxWidth: pageWidth - 2 * margin });
-    yPos += 10;
-
-    doc.setFontSize(11);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Positioning Statement", margin, yPos);
-    yPos += 6;
-    doc.setFontSize(9);
-    doc.setTextColor(50, 50, 50);
-    const posText = strat?.how_to_win?.positioning_statement || "—";
-    const posLines = doc.splitTextToSize(posText, pageWidth - 2 * margin);
-    doc.text(posLines, margin + 3, yPos);
-    yPos += posLines.length * 5 + 10;
-
-    // Target Accounts
-    checkPageBreak(40);
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Target Accounts", margin, yPos);
-    yPos += 8;
-
-    result.target_accounts?.forEach((acc, i) => {
-      checkPageBreak(30);
-      doc.setFontSize(11);
-      doc.setTextColor(0, 0, 0);
-      doc.text(`${i + 1}. ${acc.company} (${acc.country})`, margin, yPos);
-      yPos += 6;
-      doc.setFontSize(9);
-      doc.setTextColor(0, 110, 32);
-      doc.text(formatARR(acc.deal_potential_arr), margin + 3, yPos);
-      yPos += 5;
-      doc.setFontSize(8);
-      doc.setTextColor(50, 50, 50);
-      const whyLines = doc.splitTextToSize(acc.why_relevant, pageWidth - 2 * margin - 3);
-      doc.text(whyLines, margin + 3, yPos);
-      yPos += whyLines.length * 4 + 8;
-    });
-
-    // Save PDF
-    const fileName = `RivalIQ_${result.company_profile?.company_name?.replace(/\s+/g, '_') || 'Strategy'}_${new Date().toISOString().split('T')[0]}.pdf`;
-    doc.save(fileName);
-  };
-
-  const generateBattlecard = async (competitorName) => {
-    setLoadingBattlecard(true);
-    try {
-      const response = await axios.post(`${API}/battlecard`, {
-        competitor_name: competitorName,
-        company_profile: result.company_profile,
-        competitors: result.competitors,
-        strategy: result.strategy
-      });
-      
-      setBattlecardData(response.data);
-      setShowBattlecard(true);
-    } catch (err) {
-      console.error("Battlecard generation failed:", err);
-      alert("Failed to generate battlecard. Please try again.");
-    } finally {
-      setLoadingBattlecard(false);
-    }
-  };
-
-  const exportBattlecardToPDF = () => {
-    if (!battlecardData) return;
-
-    const doc = new jsPDF();
-    const margin = 15;
-    let yPos = 20;
-
-    // Title
-    doc.setFontSize(20);
-    doc.setTextColor(87, 78, 177);
-    doc.text(`Battlecard: ${battlecardData.competitor_name}`, margin, yPos);
-    yPos += 10;
-
-    doc.setFontSize(10);
-    doc.setTextColor(100, 100, 100);
-    doc.text(new Date().toLocaleDateString(), margin, yPos);
-    yPos += 15;
-
-    // Weaknesses
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Their Weaknesses vs Us", margin, yPos);
-    yPos += 8;
-
-    battlecardData.weaknesses?.forEach((w, i) => {
-      doc.setFontSize(9);
-      doc.text(`${i + 1}. ${w}`, margin + 3, yPos);
-      yPos += 6;
-    });
-    yPos += 8;
-
-    // Objections
-    doc.setFontSize(14);
-    doc.text("Common Objections & Counters", margin, yPos);
-    yPos += 8;
-
-    battlecardData.objections?.forEach((obj, i) => {
-      doc.setFontSize(10);
-      doc.setTextColor(186, 26, 26);
-      doc.text(`Objection: ${obj.objection}`, margin + 3, yPos);
-      yPos += 6;
-      doc.setFontSize(9);
-      doc.setTextColor(0, 110, 32);
-      const counterLines = doc.splitTextToSize(`Counter: ${obj.counter}`, doc.internal.pageSize.getWidth() - 2 * margin);
-      doc.text(counterLines, margin + 3, yPos);
-      yPos += counterLines.length * 5 + 8;
-    });
-
-    // Trap Question
-    yPos += 5;
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Trap-Setting Question", margin, yPos);
-    yPos += 8;
-    doc.setFontSize(9);
-    const trapLines = doc.splitTextToSize(battlecardData.trap_question || "", doc.internal.pageSize.getWidth() - 2 * margin);
-    doc.text(trapLines, margin + 3, yPos);
-    yPos += trapLines.length * 5 + 10;
-
-    // Winning Message
-    doc.setFontSize(14);
-    doc.setTextColor(87, 78, 177);
-    doc.text("Our Winning Message", margin, yPos);
-    yPos += 8;
-    doc.setFontSize(9);
-    doc.setTextColor(0, 0, 0);
-    const msgLines = doc.splitTextToSize(battlecardData.winning_message || "", doc.internal.pageSize.getWidth() - 2 * margin);
-    doc.text(msgLines, margin + 3, yPos);
-
-    doc.save(`Battlecard_${battlecardData.competitor_name}.pdf`);
+    setTimeout(() => { cleanup(); }, 15000);
   };
 
   return (
-    <div className="app">
-      <div className="wordmark">
-        RivalIQ <span className="wordmark-accent">GTM Engine</span>
+    <div>
+      {/* NAV */}
+      <div className="nav">
+        <div className="logo" onClick={goHome}>
+          <div className="logo-mark"></div>
+          <span className="logo-text">RivalIQ</span>
+          <span className="logo-badge">GTM ENGINE</span>
+        </div>
+        <div className="nav-links">
+          <a>How it works</a>
+          <a>Pricing</a>
+          <a>Sign in</a>
+          <button className="btn-primary">Start free →</button>
+        </div>
       </div>
 
-      {/* HOME SCREEN */}
+      {/* ═══════════════ HOMEPAGE ═══════════════ */}
       {screen === "home" && (
         <div className="screen active">
           <div className="hero">
-            <p className="label" style={{ marginBottom: "12px" }}>
-              Competitive Intelligence
-            </p>
-            <h1 className="hero-headline">
-              Know exactly where to
-              <br />
-              compete — and what to do next.
-            </h1>
-            <p className="hero-sub">
-              Paste your company URL. Get a complete competitive GTM strategy:
-              positioning gaps, strategic decision, and 5 target accounts with
-              execution plans.
-            </p>
-            <div className="input-group">
-              <div className="input-label">Company URL</div>
-              <div className="url-row">
-                <input
-                  className="url-input"
-                  type="text"
-                  placeholder="https://yourcompany.com"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && startAnalysis()}
-                  disabled={isSubmitting}
-                />
-                <button 
-                  className="btn-primary" 
-                  onClick={startAnalysis}
-                  disabled={isSubmitting || !url.trim()}
-                >
-                  {isSubmitting ? "Starting..." : "Analyse →"}
-                </button>
-              </div>
+            <div className="eyebrow">
+              <div className="eyebrow-dot"></div>
+              <span className="eyebrow-text">AI-POWERED · 6-STEP PIPELINE</span>
+            </div>
+            <h1 className="serif">Stop guessing<br />where to <em>compete</em>.</h1>
+            <p className="hero-sub">Paste your URL. Get a decisive GTM strategy, competitor battlecards, and 5 target accounts — in under 2 minutes.</p>
+            <div className="url-box">
+              <input 
+                type="text" 
+                placeholder="https://yourcompany.com"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                onKeyPress={(e) => e.key === "Enter" && startAnalysis()}
+                disabled={isSubmitting}
+              />
+              <button 
+                className="btn-hero" 
+                onClick={startAnalysis}
+                disabled={isSubmitting || !url.trim()}
+              >
+                {isSubmitting ? "Starting..." : "Analyse →"}
+              </button>
             </div>
             {error && (
-              <div className="error-message">
-                Error: {error}
-              </div>
+              <div className="error-message">{error}</div>
             )}
-            <div className="stat-row">
-              <div className="stat-item">
-                <div className="stat-num">06</div>
-                <div className="stat-desc">Pipeline steps</div>
-              </div>
-              <div className="stat-item">
-                <div className="stat-num">&lt;2m</div>
-                <div className="stat-desc">To full strategy</div>
-              </div>
-              <div className="stat-item">
-                <div className="stat-num">05</div>
-                <div className="stat-desc">Target accounts</div>
-              </div>
+            <div className="hero-meta">
+              <span><span className="check">✓</span> No credit card</span>
+              <span><span className="check">✓</span> First analysis free</span>
+              <span><span className="check">✓</span> Under 2 minutes</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* LOADING SCREEN */}
+      {/* ═══════════════ LOADING ═══════════════ */}
       {screen === "loading" && (
         <div className="screen active">
-          <div className="loading-wrap">
-            <div className="label" style={{ marginBottom: "8px" }}>
-              Analysing
+          <div className="loading-screen">
+            <div className="loading-head">
+              <div className="label">Analysing</div>
+              <h1 className="serif">Running your GTM pipeline.</h1>
+              <div className="loading-url">{url}</div>
             </div>
-            <div className="loading-url">{url}</div>
-            <div className="pipeline">
-              {STEP_LABELS.map((label, idx) => {
+            <div className="pipe">
+              {STEP_LABELS.map((step, idx) => {
                 const stepNum = idx + 1;
                 const isActive = currentStep === stepNum;
                 const isDone = currentStep > stepNum;
-
+                
                 return (
-                  <div className="pipe-step" key={idx}>
-                    <span
-                      className={`step-idx ${isActive ? "active" : ""} ${
-                        isDone ? "done" : ""
-                      }`}
-                    >
-                      {isDone ? "✓" : `0${stepNum}`}
-                    </span>
-                    <span
-                      className={`step-name ${isActive ? "active" : ""} ${
-                        isDone ? "done" : ""
-                      }`}
-                    >
-                      {label}
-                    </span>
-                    <span
-                      className={`step-dot ${isActive ? "active" : ""} ${
-                        isDone ? "done" : ""
-                      }`}
-                    ></span>
+                  <div key={idx} className={`pipe-step ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}`}>
+                    <div className="pipe-idx">
+                      {isDone ? '✓' : `0${stepNum}`}
+                    </div>
+                    <div>
+                      <div className="pipe-name">{step.name}</div>
+                      <div className="pipe-desc">{step.desc}</div>
+                    </div>
+                    <div className="pipe-status">
+                      {isActive ? <span className="spinner"></span> : isDone ? 'done' : '—'}
+                    </div>
                   </div>
                 );
               })}
             </div>
-            <div className="loading-status">
-              {currentStep > 0
-                ? `Processing: ${STEP_LABELS[currentStep - 1]}...`
-                : "Scanning website content..."}
+            <div className="loading-footer">
+              <span>{statusMsg}</span>
+              <span className="mono">{loadElapsed}s</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* RESULTS SCREEN */}
+      {/* ═══════════════ RESULTS ═══════════════ */}
       {screen === "results" && result && (
         <div className="screen active">
-          <div className="results-bar">
-            <div>
-              <div className="company-name">
-                {result.company_profile?.company_name || "Company"}
-              </div>
-              <div className="company-sub">
-                {result.url} · {result.company_profile?.industry || "N/A"} ·{" "}
-                {result.company_profile?.target_customer || "N/A"}
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button className="btn-ghost" onClick={exportToPDF}>
-                ↓ Export PDF
-              </button>
-              <button className="btn-ghost" onClick={resetApp}>
-                ↩ New analysis
-              </button>
-            </div>
+          <div className="results">
+            <ResultsScreen 
+              result={result} 
+              activeTab={activeTab}
+              switchTab={switchTab}
+              goHome={goHome}
+              exportPDF={exportPDF}
+              openBattlecard={openBattlecard}
+            />
           </div>
-
-          <div className="tabs">
-            <button
-              className={`tab ${activeTab === "overview" ? "active" : ""}`}
-              onClick={() => setActiveTab("overview")}
-            >
-              Overview
-            </button>
-            <button
-              className={`tab ${activeTab === "competitors" ? "active" : ""}`}
-              onClick={() => setActiveTab("competitors")}
-            >
-              Competitors
-            </button>
-            <button
-              className={`tab ${activeTab === "strategy" ? "active" : ""}`}
-              onClick={() => setActiveTab("strategy")}
-            >
-              Strategy
-            </button>
-            <button
-              className={`tab ${activeTab === "accounts" ? "active" : ""}`}
-              onClick={() => setActiveTab("accounts")}
-            >
-              Accounts
-            </button>
-          </div>
-
-          {/* TAB: OVERVIEW */}
-          {activeTab === "overview" && (
-            <div className="tab-panel active">
-              <OverviewTab result={result} />
-            </div>
-          )}
-
-          {/* TAB: COMPETITORS */}
-          {activeTab === "competitors" && (
-            <div className="tab-panel active">
-              <CompetitorsTab result={result} onGenerateBattlecard={generateBattlecard} loadingBattlecard={loadingBattlecard} />
-            </div>
-          )}
-
-          {/* TAB: STRATEGY */}
-          {activeTab === "strategy" && (
-            <div className="tab-panel active">
-              <StrategyTab result={result} />
-            </div>
-          )}
-
-          {/* TAB: ACCOUNTS */}
-          {activeTab === "accounts" && (
-            <div className="tab-panel active">
-              <AccountsTab result={result} />
-            </div>
-          )}
         </div>
       )}
 
       {/* BATTLECARD MODAL */}
-      {showBattlecard && (
+      {showBattlecard && battlecardData && (
         <BattlecardModal 
-          battlecardData={battlecardData}
-          onClose={() => setShowBattlecard(false)}
-          onExport={exportBattlecardToPDF}
+          data={battlecardData}
+          onClose={closeBattlecard}
         />
       )}
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// TAB COMPONENTS
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
+// RESULTS SCREEN COMPONENT
+// ═══════════════════════════════════════════════════
+function ResultsScreen({ result, activeTab, switchTab, goHome, exportPDF, openBattlecard }) {
+  const p = result.company_profile || {};
+  
+  return (
+    <>
+      <div className="results-head">
+        <div className="results-title">
+          <div className="results-favicon">{p.company_name?.[0] || 'C'}</div>
+          <div>
+            <div className="results-name serif">{p.company_name || 'Company'}</div>
+            <div className="results-meta">
+              {result.url?.replace(/https?:\/\//,'')} · {p.industry} · {p.target_customer}
+            </div>
+          </div>
+        </div>
+        <div className="results-actions">
+          <button className="btn-outline" onClick={exportPDF}>↓ Export PDF</button>
+          <button className="btn-outline" onClick={goHome}>↩ New analysis</button>
+        </div>
+      </div>
 
+      <div className="tabs">
+        <button className={`tab ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => switchTab('overview')}>Overview</button>
+        <button className={`tab ${activeTab === 'competitors' ? 'active' : ''}`} onClick={() => switchTab('competitors')}>Competitors</button>
+        <button className={`tab ${activeTab === 'strategy' ? 'active' : ''}`} onClick={() => switchTab('strategy')}>Strategy</button>
+        <button className={`tab ${activeTab === 'accounts' ? 'active' : ''}`} onClick={() => switchTab('accounts')}>Accounts</button>
+      </div>
+
+      {activeTab === 'overview' && <OverviewTab result={result} />}
+      {activeTab === 'competitors' && <CompetitorsTab result={result} openBattlecard={openBattlecard} />}
+      {activeTab === 'strategy' && <StrategyTab result={result} />}
+      {activeTab === 'accounts' && <AccountsTab result={result} />}
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// TAB COMPONENTS
+// ═══════════════════════════════════════════════════
 function OverviewTab({ result }) {
-  const profile = result.company_profile || {};
+  const p = result.company_profile || {};
   const gaps = result.gaps || {};
-  const strategy = result.strategy || {};
+  const s = result.strategy || {};
+  
+  const snapItems = [
+    ['Product', p.product],
+    ['Target customer', p.target_customer],
+    ['Pricing model', p.pricing_model],
+    ['Positioning', p.positioning],
+    ['Industry', p.industry],
+    ['Geography', p.market_focus || 'Global']
+  ];
 
   return (
     <>
-      <div className="section">
-        <div className="label" style={{ marginBottom: "12px" }}>
-          Company snapshot
-        </div>
-        <div className="snap-grid">
-          <div className="snap-cell">
-            <div className="snap-label">Product</div>
-            <div className="snap-value">{profile.product || "—"}</div>
-          </div>
-          <div className="snap-cell">
-            <div className="snap-label">Target customer</div>
-            <div className="snap-value">{profile.target_customer || "—"}</div>
-          </div>
-          <div className="snap-cell">
-            <div className="snap-label">Pricing model</div>
-            <div className="snap-value">{profile.pricing_model || "—"}</div>
-          </div>
-          <div className="snap-cell">
-            <div className="snap-label">Positioning</div>
-            <div className="snap-value">{profile.positioning || "—"}</div>
-          </div>
-          <div className="snap-cell">
-            <div className="snap-label">Industry</div>
-            <div className="snap-value">{profile.industry || "—"}</div>
-          </div>
-          <div className="snap-cell">
-            <div className="snap-label">Geography</div>
-            <div className="snap-value">Global</div>
-          </div>
+      <div className="block">
+        <div className="block-head"><div className="label">Company snapshot</div></div>
+        <div className="snap">
+          {snapItems.map(([k, v], i) => (
+            <div key={i} className="snap-cell">
+              <div className="snap-lbl">{k}</div>
+              <div className="snap-val">{v || '—'}</div>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="section">
-        <div className="label" style={{ marginBottom: "12px" }}>
-          Strategic gaps
-        </div>
-        <div className="gap-row">
-          <div className="gap-card">
-            <div className="gap-type-label gt-weak">Weaknesses</div>
+      <div className="block">
+        <div className="block-head"><div className="label">Strategic gaps</div></div>
+        <div className="gaps">
+          <div className="gap gap-weak">
+            <div className="gap-icon">⚠</div>
+            <div className="gap-head">Weaknesses</div>
             <ul className="gap-list">
               {gaps.weaknesses?.map((w, i) => (
-                <li key={i} className="gt-weak-li">
-                  {w.area}
-                </li>
+                <li key={i}>{w.area}</li>
               ))}
             </ul>
           </div>
-          <div className="gap-card">
-            <div className="gap-type-label gt-crowd">Overcrowded</div>
+          <div className="gap gap-crowd">
+            <div className="gap-icon">⚡</div>
+            <div className="gap-head">Overcrowded</div>
             <ul className="gap-list">
               {gaps.overcrowded_areas?.map((c, i) => (
-                <li key={i} className="gt-crowd-li">
-                  {c.area}
-                </li>
+                <li key={i}>{c.area}</li>
               ))}
             </ul>
           </div>
-          <div className="gap-card">
-            <div className="gap-type-label gt-opp">Opportunity</div>
+          <div className="gap gap-opp">
+            <div className="gap-icon">✦</div>
+            <div className="gap-head">Opportunity</div>
             <ul className="gap-list">
               {gaps.underserved_opportunities?.map((o, i) => (
-                <li key={i} className="gt-opp-li">
-                  {o.opportunity}
-                </li>
+                <li key={i}>{o.opportunity}</li>
               ))}
             </ul>
           </div>
         </div>
       </div>
 
-      <div className="section">
-        <div className="label" style={{ marginBottom: "12px" }}>
-          Recommended strategy
-        </div>
-        <div className="strategy-block-hero">
-          <div className="strategy-stamp-hero">THE DECISION</div>
-          <div className="strategy-row">
-            <div className="strat-key">Where to play</div>
-            <div>
-              <div className="strat-value">
-                {strategy.where_to_play?.segment || "—"},{" "}
-                {strategy.where_to_play?.geography || "—"}
-              </div>
-              <div className="strat-why">
-                {strategy.where_to_play?.why || "—"}
-              </div>
-            </div>
-          </div>
-          <div className="strategy-row">
-            <div className="strat-key">How to win</div>
-            <div>
-              <div className="strat-value">
-                {strategy.how_to_win?.differentiation || "—"}
-              </div>
-              <div className="strat-why">
-                {strategy.how_to_win?.positioning_statement || "—"}
-              </div>
-            </div>
-          </div>
-        </div>
+      <div className="block">
+        <div className="block-head"><div className="label">Recommended strategy</div></div>
+        <StrategyCard strategy={s} compact={true} />
       </div>
     </>
   );
 }
 
-function CompetitorsTab({ result, onGenerateBattlecard, loadingBattlecard }) {
-  const profile = result.company_profile || {};
+function CompetitorsTab({ result, openBattlecard }) {
+  const p = result.company_profile || {};
   const competitors = result.competitors || [];
   const comparison = result.comparison || {};
+  
+  const statusMap = [['danger', 'DANGER'], ['overlap', 'OVERLAP'], ['safe', 'SAFE'], ['overlap', 'OVERLAP'], ['danger', 'DANGER'], ['safe', 'SAFE'], ['overlap', 'OVERLAP']];
 
   return (
     <>
-      <div className="section">
-        <div className="label" style={{ marginBottom: "12px" }}>
-          Positioning comparison
-        </div>
+      <div className="block">
+        <div className="block-head"><div className="label">Positioning comparison</div></div>
         <table className="comp-table">
           <thead>
             <tr>
               <th>Company</th>
               <th>ICP</th>
-              <th>Price / seat</th>
+              <th>Price</th>
               <th>Core message</th>
-              <th>Actions</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
-            <tr className="you-row">
-              <td>{(profile.company_name || "YOU").toUpperCase()} ↗</td>
-              <td>{comparison.subject?.icp || "—"}</td>
-              <td>{comparison.subject?.price_positioning || "—"}</td>
-              <td>{comparison.subject?.core_message || "—"}</td>
-              <td>
-                <span className="comp-badge">You</span>
-              </td>
+            <tr className="you">
+              <td className="comp-cname">{(p.company_name || 'YOU').toUpperCase()} ↗</td>
+              <td>{comparison.subject?.icp || '—'}</td>
+              <td>{comparison.subject?.price_positioning || '—'}</td>
+              <td>{comparison.subject?.core_message || '—'}</td>
+              <td><span className="badge-you">YOU</span></td>
             </tr>
             {competitors.map((c, i) => (
               <tr key={i}>
-                <td className="comp-name-mono">{c.name}</td>
+                <td className="comp-cname">{c.name}</td>
                 <td>{c.target_segment}</td>
                 <td>{c.price_range}</td>
                 <td>{c.positioning}</td>
-                <td>
-                  <button 
-                    onClick={() => onGenerateBattlecard(c.name)}
-                    disabled={loadingBattlecard}
-                    style={{
-                      background: 'var(--primary-container)',
-                      color: 'var(--primary)',
-                      border: 'none',
-                      padding: '4px 10px',
-                      borderRadius: '0.25rem',
-                      fontSize: '11px',
-                      fontFamily: 'var(--mono)',
-                      cursor: loadingBattlecard ? 'not-allowed' : 'pointer',
-                      opacity: loadingBattlecard ? 0.5 : 1,
-                      letterSpacing: '0.03em'
-                    }}
-                  >
-                    {loadingBattlecard ? '...' : '→ Generate Battlecard'}
-                  </button>
-                </td>
+                <td></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <div className="section">
-        <div className="label" style={{ marginBottom: "12px" }}>
-          Competitor profiles
+      <div className="block">
+        <div className="block-head">
+          <div className="label">Competitor profiles</div>
+          <div className="mono" style={{fontSize:'10px',color:'var(--ink-3)',letterSpacing:'0.05em'}}>⚡ BATTLECARDS READY</div>
         </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(2, 1fr)",
-            gap: "2px",
-            background: "var(--surface-container)",
-          }}
-        >
-          {competitors.map((c, i) => (
-            <div
-              key={i}
-              style={{
-                background: "var(--surface-lowest)",
-                padding: "18px 20px",
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: "var(--mono)",
-                  fontSize: "11px",
-                  fontWeight: "500",
-                  color: "var(--on-surface)",
-                  marginBottom: "6px",
-                }}
-              >
-                {c.name}
+        <div className="comp-grid">
+          {competitors.map((c, i) => {
+            const [cls, label] = statusMap[i % statusMap.length];
+            return (
+              <div key={i} className={`comp-card ${cls}`}>
+                <div className="comp-head">
+                  <div className="comp-fav">{c.name[0]}</div>
+                  <div className="comp-info">
+                    <div className="comp-name">{c.name}</div>
+                    <div className="comp-tag">{c.target_segment} · {c.price_range}</div>
+                  </div>
+                  <span className={`comp-status status-${cls}`}>{label}</span>
+                </div>
+                <div className="comp-body">{c.strengths}</div>
+                <div className="comp-cta">
+                  <button className="btn-battle" onClick={() => openBattlecard(i)}>
+                    ⚡ View battlecard
+                  </button>
+                </div>
               </div>
-              <div
-                style={{
-                  fontSize: "12px",
-                  color: "var(--on-surface-variant)",
-                  lineHeight: "1.65",
-                }}
-              >
-                {c.strengths}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </>
@@ -843,131 +685,48 @@ function CompetitorsTab({ result, onGenerateBattlecard, loadingBattlecard }) {
 }
 
 function StrategyTab({ result }) {
-  const strategy = result.strategy || {};
-
+  const s = result.strategy || {};
+  
   return (
-    <div className="section">
-      <div className="label" style={{ marginBottom: "12px" }}>
-        Full GTM strategy
-      </div>
-      <div className="strategy-block">
-        <div className="strategy-stamp">
-          Decision output · Confidence {strategy.confidence || 0}%
-        </div>
-        <div className="strategy-row">
-          <div className="strat-key">Target segment</div>
-          <div>
-            <div className="strat-value">
-              {strategy.where_to_play?.segment || "—"},{" "}
-              {strategy.where_to_play?.geography || "—"}
-            </div>
-            <div className="strat-why">
-              {strategy.where_to_play?.why || "—"}
-            </div>
-          </div>
-        </div>
-        <div className="strategy-row">
-          <div className="strat-key">Target persona</div>
-          <div>
-            <div className="strat-value">
-              {strategy.where_to_play?.persona || "—"}
-            </div>
-            <div className="strat-why">
-              {strategy.how_to_win?.core_tactic || "—"}
-            </div>
-          </div>
-        </div>
-        <div className="strategy-row">
-          <div className="strat-key">Differentiation</div>
-          <div>
-            <div className="strat-value">
-              {strategy.how_to_win?.differentiation || "—"}
-            </div>
-            <div className="strat-why">
-              {strategy.how_to_win?.positioning_statement || "—"}
-            </div>
-          </div>
-        </div>
-        <div className="strategy-row">
-          <div className="strat-key">Pricing</div>
-          <div>
-            <div className="strat-value">
-              {strategy.pricing_recommendation?.price_point || "—"} ·{" "}
-              {strategy.pricing_recommendation?.model || "—"}
-            </div>
-            <div className="strat-why">
-              {strategy.pricing_recommendation?.rationale || "—"}
-            </div>
-          </div>
-        </div>
-        <div className="strategy-row">
-          <div className="strat-key">90-day actions</div>
-          <div>
-            {strategy.ninety_day_actions?.map((a, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  gap: "10px",
-                  alignItems: "baseline",
-                  marginBottom: "8px",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "var(--mono)",
-                    fontSize: "10px",
-                    color: "var(--primary)",
-                    minWidth: "24px",
-                  }}
-                >
-                  0{a.priority}
-                </span>
-                <span
-                  style={{
-                    fontSize: "12px",
-                    color: "var(--on-surface-variant)",
-                  }}
-                >
-                  {a.action}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
+    <div className="block">
+      <div className="block-head"><div className="label">Full GTM strategy</div></div>
+      <StrategyCard strategy={s} compact={false} />
     </div>
   );
 }
 
 function AccountsTab({ result }) {
   const accounts = result.target_accounts || [];
-
+  
   return (
-    <div className="section">
-      <div className="label" style={{ marginBottom: "12px" }}>
-        Target accounts · {accounts.length} identified
+    <div className="block">
+      <div className="block-head">
+        <div className="label">Target accounts · {accounts.length} identified</div>
+        <div className="mono" style={{fontSize:'10px',color:'var(--ink-3)',letterSpacing:'0.05em'}}>RANKED BY DEAL POTENTIAL</div>
       </div>
-      <div className="account-list">
+      <div className="accounts">
         {accounts.map((a, i) => (
-          <div key={i} className="account-card">
-            <div className="acc-top">
-              <span className="acc-name">{a.company}</span>
-              <span className="acc-arr">{formatARR(a.deal_potential_arr)}</span>
+          <div key={i} className="account">
+            <div className="account-top">
+              <div>
+                <div className="account-name serif">{a.company}</div>
+                <div className="account-geo">{a.country}</div>
+              </div>
+              <div className="account-arr">{a.deal_potential_arr}</div>
             </div>
-            <div className="acc-why">{a.why_relevant}</div>
-            <div className="acc-grid">
-              <div className="acc-meta">
-                <div className="acc-meta-key">Risk</div>
-                <div className="acc-meta-val">{a.risk}</div>
+            <div className="account-why">{a.why_relevant}</div>
+            <div className="account-grid">
+              <div className="account-meta">
+                <div className="account-meta-key">Risk</div>
+                <div className="account-meta-val">{a.risk}</div>
               </div>
-              <div className="acc-meta">
-                <div className="acc-meta-key">Approach</div>
-                <div className="acc-meta-val">{a.approach}</div>
+              <div className="account-meta">
+                <div className="account-meta-key">Approach</div>
+                <div className="account-meta-val">{a.approach}</div>
               </div>
-              <div className="acc-signal">
-                <div className="acc-signal-key">Signal</div>
-                <div className="acc-signal-val">{a.timing_signal}</div>
+              <div className="account-meta signal">
+                <div className="account-meta-key">◆ Timing signal</div>
+                <div className="account-meta-val">{a.timing_signal}</div>
               </div>
             </div>
           </div>
@@ -977,153 +736,164 @@ function AccountsTab({ result }) {
   );
 }
 
-// Battlecard Modal Component
-function BattlecardModal({ battlecardData, onClose, onExport }) {
-  if (!battlecardData) return null;
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0,0,0,0.6)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 9999,
-      padding: '20px'
-    }}>
-      <div style={{
-        background: 'var(--surface-lowest)',
-        maxWidth: '700px',
-        width: '100%',
-        maxHeight: '90vh',
-        overflow: 'auto',
-        borderRadius: '0.25rem',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
-      }}>
-        <div style={{
-          padding: '28px 32px',
-          borderBottom: '2px solid var(--outline-faint)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start'
-        }}>
+// ═══════════════════════════════════════════════════
+// STRATEGY CARD COMPONENT
+// ═══════════════════════════════════════════════════
+function StrategyCard({ strategy, compact }) {
+  const s = strategy || {};
+  const wherePlay = `${s.where_to_play?.segment || ''}, ${s.where_to_play?.geography || ''}`;
+  
+  if (compact) {
+    return (
+      <div className="strat-card">
+        <div className="strat-top">
           <div>
-            <div className="label" style={{ marginBottom: '8px' }}>COMPETITIVE BATTLECARD</div>
-            <h2 style={{ fontSize: '22px', fontWeight: '600', margin: 0, letterSpacing: '-0.02em' }}>
-              {battlecardData.competitor_name}
-            </h2>
+            <div className="strat-stamp">THE DECISION · STRATEGY ENGINE V1</div>
+            <div className="strat-heading serif">Your GTM call.</div>
           </div>
-          <button 
-            onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '28px',
-              cursor: 'pointer',
-              color: 'var(--on-surface-muted)',
-              lineHeight: 1,
-              padding: 0
-            }}
-          >×</button>
+          <div className="strat-conf">
+            <div className="strat-conf-lbl">CONFIDENCE</div>
+            <div className="strat-conf-val">{s.confidence || 0}%</div>
+          </div>
         </div>
-        
-        <div style={{ padding: '32px' }}>
-          {/* Weaknesses */}
-          <div style={{ marginBottom: '28px' }}>
-            <div className="label" style={{ marginBottom: '14px', color: 'var(--error)' }}>
-              THEIR WEAKNESSES VS US
-            </div>
-            <ol style={{ paddingLeft: '24px', margin: 0 }}>
-              {battlecardData.weaknesses?.map((w, i) => (
-                <li key={i} style={{ fontSize: '14px', marginBottom: '10px', color: 'var(--on-surface)', lineHeight: '1.6' }}>
-                  {w}
-                </li>
-              ))}
-            </ol>
+        <div className="strat-row">
+          <div className="strat-key">WHERE TO PLAY</div>
+          <div>
+            <div className="strat-val serif">{wherePlay}</div>
+            <div className="strat-why">{s.where_to_play?.why || '—'}</div>
           </div>
-
-          {/* Objections */}
-          <div style={{ marginBottom: '28px' }}>
-            <div className="label" style={{ marginBottom: '14px' }}>COMMON OBJECTIONS & COUNTERS</div>
-            {battlecardData.objections?.map((obj, i) => (
-              <div key={i} style={{
-                background: 'var(--surface-container)',
-                padding: '18px',
-                marginBottom: '14px',
-                borderRadius: '0.25rem',
-                borderLeft: '3px solid var(--error)'
-              }}>
-                <div style={{
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  color: 'var(--error)',
-                  marginBottom: '10px',
-                  fontStyle: 'italic'
-                }}>
-                  "{obj.objection}"
-                </div>
-                <div style={{
-                  fontSize: '13px',
-                  color: 'var(--on-surface-variant)',
-                  lineHeight: '1.7'
-                }}>
-                  <strong style={{ color: 'var(--secondary)' }}>→</strong> {obj.counter}
-                </div>
+        </div>
+        <div className="strat-row">
+          <div className="strat-key">HOW TO WIN</div>
+          <div>
+            <div className="strat-val serif">{s.how_to_win?.differentiation || '—'}</div>
+            <div className="strat-why">"{s.how_to_win?.positioning_statement || '—'}"</div>
+          </div>
+        </div>
+        <div className="strat-actions">
+          <div className="strat-actions-head">◆ 90-DAY ACTION PLAN</div>
+          <div className="strat-actions-grid">
+            {s.ninety_day_actions?.map((a, i) => (
+              <div key={i} className="strat-action">
+                <span className="strat-action-num">0{a.priority}</span>
+                <span className="strat-action-text">{a.action}</span>
               </div>
             ))}
           </div>
-
-          {/* Trap Question */}
-          <div style={{ marginBottom: '28px' }}>
-            <div className="label" style={{ marginBottom: '14px', color: 'var(--primary)' }}>
-              TRAP-SETTING QUESTION
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="strat-card">
+      <div className="strat-top">
+        <div>
+          <div className="strat-stamp">THE DECISION · FULL STRATEGY</div>
+          <div className="strat-heading serif">Your complete GTM playbook.</div>
+        </div>
+        <div className="strat-conf">
+          <div className="strat-conf-lbl">CONFIDENCE</div>
+          <div className="strat-conf-val">{s.confidence || 0}%</div>
+        </div>
+      </div>
+      <div className="strat-row">
+        <div className="strat-key">SEGMENT</div>
+        <div>
+          <div className="strat-val serif">{wherePlay}</div>
+          <div className="strat-why">{s.where_to_play?.why || '—'}</div>
+        </div>
+      </div>
+      <div className="strat-row">
+        <div className="strat-key">PERSONA</div>
+        <div>
+          <div className="strat-val serif">{s.where_to_play?.persona || '—'}</div>
+          <div className="strat-why">{s.how_to_win?.core_tactic || '—'}</div>
+        </div>
+      </div>
+      <div className="strat-row">
+        <div className="strat-key">HOW TO WIN</div>
+        <div>
+          <div className="strat-val serif">{s.how_to_win?.differentiation || '—'}</div>
+          <div className="strat-why">"{s.how_to_win?.positioning_statement || '—'}"</div>
+        </div>
+      </div>
+      <div className="strat-row">
+        <div className="strat-key">PRICING</div>
+        <div>
+          <div className="strat-val serif">{s.pricing_recommendation?.price_point || '—'} · {s.pricing_recommendation?.model || '—'}</div>
+          <div className="strat-why">{s.pricing_recommendation?.rationale || '—'}</div>
+        </div>
+      </div>
+      <div className="strat-actions">
+        <div className="strat-actions-head">◆ 90-DAY ACTION PLAN</div>
+        <div className="strat-actions-grid">
+          {s.ninety_day_actions?.map((a, i) => (
+            <div key={i} className="strat-action">
+              <span className="strat-action-num">0{a.priority}</span>
+              <span className="strat-action-text">{a.action}</span>
             </div>
-            <div style={{
-              background: 'var(--primary-container)',
-              padding: '20px',
-              borderRadius: '0.25rem',
-              fontSize: '14px',
-              fontStyle: 'italic',
-              color: 'var(--on-surface)',
-              lineHeight: '1.6',
-              borderLeft: '3px solid var(--primary)'
-            }}>
-              {battlecardData.trap_question}
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// BATTLECARD MODAL COMPONENT
+// ═══════════════════════════════════════════════════
+function BattlecardModal({ data, onClose }) {
+  const competitor = data.competitor;
+  const battlecard = data.battlecard;
+
+  return (
+    <div className="modal-overlay active" onClick={(e) => e.target.className.includes('modal-overlay') && onClose()}>
+      <div className="modal">
+        <div className="modal-head">
+          <div className="modal-title">
+            <div className="comp-fav">{competitor.name[0]}</div>
+            <div>
+              <h2 className="serif">Beat {competitor.name}</h2>
+              <span>BATTLECARD · {competitor.target_segment.toUpperCase()}</span>
             </div>
           </div>
-
-          {/* Winning Message */}
-          <div style={{ marginBottom: '32px' }}>
-            <div className="label" style={{ marginBottom: '14px', color: 'var(--secondary)' }}>
-              OUR WINNING MESSAGE
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          {!battlecard ? (
+            <div className="battle-placeholder">
+              Battlecards generating… This feature is being processed. Please check back soon.
             </div>
-            <div style={{
-              background: 'rgba(0,110,32,0.08)',
-              padding: '20px',
-              borderRadius: '0.25rem',
-              fontSize: '14px',
-              fontWeight: '500',
-              color: 'var(--on-surface)',
-              lineHeight: '1.7',
-              borderLeft: '3px solid var(--secondary)'
-            }}>
-              {battlecardData.winning_message}
-            </div>
-          </div>
-
-          {/* Footer Buttons */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '20px', borderTop: '1px solid var(--outline-faint)' }}>
-            <button className="btn-ghost" onClick={onClose}>
-              Close
-            </button>
-            <button className="btn-primary" onClick={onExport}>
-              ↓ Export PDF
-            </button>
-          </div>
+          ) : (
+            <>
+              <div className="battle-section">
+                <h3>Their weaknesses vs you</h3>
+                {battlecard.weaknesses?.map((w, i) => (
+                  <div key={i} className="battle-weakness">
+                    <strong>{w.area}</strong> — {w.detail}
+                  </div>
+                ))}
+              </div>
+              <div className="battle-section">
+                <h3>Objections you'll hear & how to counter</h3>
+                {battlecard.objections?.map((o, i) => (
+                  <div key={i} className="battle-objection">
+                    <div className="battle-obj-q">"{o.objection}"</div>
+                    <div className="battle-obj-a">→ {o.counter}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="battle-section">
+                <h3>Trap-setting question</h3>
+                <div className="battle-trap serif">"{battlecard.trap_question}"</div>
+              </div>
+              <div className="battle-section">
+                <h3>Your winning message</h3>
+                <div className="battle-msg serif" dangerouslySetInnerHTML={{__html: battlecard.winning_message}}></div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
