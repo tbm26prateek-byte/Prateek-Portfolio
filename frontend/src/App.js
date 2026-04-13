@@ -12,7 +12,8 @@ const STEP_LABELS = [
   { name: "Positioning Comparison", desc: "Mapping you vs them" },
   { name: "Gap Identification", desc: "Finding strategic opportunities" },
   { name: "Strategy Engine", desc: "Producing the decision" },
-  { name: "Target Accounts + Battlecards", desc: "Generating accounts & battlecards" }
+  { name: "Target Accounts", desc: "Generating 5 target companies" },
+  { name: "Generating battlecards", desc: "Creating battlecards for each competitor" }
 ];
 
 const STATUS_MSGS = [
@@ -21,7 +22,8 @@ const STATUS_MSGS = [
   'Mapping positioning matrices…',
   'Hunting for strategic gaps…',
   'Running the strategy engine…',
-  'Generating accounts & battlecards…'
+  'Generating target accounts…',
+  'Creating battlecards…'
 ];
 
 function App() {
@@ -105,7 +107,7 @@ function App() {
         if (data.status === "running") {
           const step = data.current_step || 0;
           setCurrentStep(step);
-          if (step > 0 && step <= 6) {
+          if (step > 0 && step <= 7) {
             setStatusMsg(STATUS_MSGS[step - 1]);
           }
         } else if (data.status === "complete") {
@@ -427,6 +429,100 @@ function App() {
               <span><span className="check">✓</span> No credit card</span>
               <span><span className="check">✓</span> First analysis free</span>
               <span><span className="check">✓</span> Under 2 minutes</span>
+            </div>
+          </div>
+
+          <div className="logo-strip">
+            <div className="logo-strip-label">BUILT FOR SERIES A–B SAAS · TRUSTED BY GTM TEAMS AT</div>
+            <div className="logos">
+              <span>Chargebee</span>
+              <span>Razorpay</span>
+              <span>Freshworks</span>
+              <span>Zeta</span>
+              <span>LeadSquared</span>
+              <span>Rocketlane</span>
+            </div>
+          </div>
+
+          <div className="section">
+            <div className="section-head">
+              <div className="label">What you get</div>
+              <h2 className="serif">A strategist's deliverable, <em>in minutes.</em></h2>
+            </div>
+            <div className="get-grid">
+              <div className="get-card c1">
+                <div className="get-num">01 / DECISION</div>
+                <h3 className="serif">The strategy call.</h3>
+                <p>Not a dashboard. A decision. Where to play, how to win, and what to charge — with 90-day actions to execute on.</p>
+                <div className="get-tags"><span>Segment</span><span>Persona</span><span>Pricing</span></div>
+              </div>
+              <div className="get-card c2">
+                <div className="get-num">02 / INTEL</div>
+                <h3 className="serif">Competitor X-ray.</h3>
+                <p>5–7 real competitors mapped across ICP, price, and messaging. Plus a battlecard for each — ready for your next sales call.</p>
+                <div className="get-tags"><span>Positioning</span><span>Battlecards</span></div>
+              </div>
+              <div className="get-card c3">
+                <div className="get-num">03 / ACTION</div>
+                <h3 className="serif">5 accounts to chase.</h3>
+                <p>Named companies with deal size, timing signal, risk assessment, and the exact outreach angle to use this week.</p>
+                <div className="get-tags"><span>ARR est.</span><span>Timing signals</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div className="pricing" id="pricing">
+            <div className="section-head">
+              <div className="label">Pricing</div>
+              <h2 className="serif">Less than <em>one strategist hour.</em></h2>
+            </div>
+            <div className="price-grid">
+              <div className="price-card">
+                <div className="price-tier">STARTER</div>
+                <div className="price-amount serif">₹0<em> /mo</em></div>
+                <div className="price-desc">Try it on your own company. No credit card.</div>
+                <button className="price-cta ghost">Start free</button>
+                <ul className="price-features">
+                  <li>1 analysis / month</li>
+                  <li>Full strategy output</li>
+                  <li>5 target accounts</li>
+                  <li>Export to PDF</li>
+                </ul>
+              </div>
+              <div className="price-card featured">
+                <div className="price-badge">MOST POPULAR</div>
+                <div className="price-tier">OPERATOR</div>
+                <div className="price-amount serif">₹4,999<em> /mo</em></div>
+                <div className="price-desc">For founders & GTM leads running live strategy.</div>
+                <button className="price-cta light">Start 14-day trial →</button>
+                <ul className="price-features">
+                  <li>20 analyses / month</li>
+                  <li>Auto-generated battlecards</li>
+                  <li>ICP validator</li>
+                  <li>Saved strategy history</li>
+                  <li>Priority support</li>
+                </ul>
+              </div>
+              <div className="price-card">
+                <div className="price-tier">AGENCY</div>
+                <div className="price-amount serif">₹14,999<em> /mo</em></div>
+                <div className="price-desc">For consultants running multiple accounts.</div>
+                <button className="price-cta solid">Contact sales</button>
+                <ul className="price-features">
+                  <li>Unlimited analyses</li>
+                  <li>White-label reports</li>
+                  <li>Multi-workspace</li>
+                  <li>API access</li>
+                  <li>Dedicated success manager</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div className="footer">
+            <div>© 2026 RivalIQ · Built for sharp GTM teams</div>
+            <div className="footer-links">
+              <a>Privacy</a><a>Terms</a><a>Contact</a>
             </div>
           </div>
         </div>

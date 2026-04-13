@@ -58,7 +58,7 @@ class JobStatusResponse(BaseModel):
     job_id: str
     status: str
     current_step: Optional[int] = None
-    total_steps: Optional[int] = 6
+    total_steps: Optional[int] = 7
     step_label: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     failed_at_step: Optional[int] = None
@@ -244,6 +244,34 @@ Return ONLY this JSON array, no preamble:
     "approach": ""
   }
 ]"""
+
+PROMPT_7_BATTLECARD = """You are a B2B SaaS sales enablement expert. A sales rep is about to get on a call with a prospect who is evaluating the subject company against a specific competitor. Your job is to arm them with a one-page battlecard.
+
+This is NOT a generic competitor overview. This is a tactical weapon for a live sales conversation.
+
+Rules:
+- Every weakness must be specific and concrete — reference implementation time, pricing mechanics, feature gaps, or customer segment fit. No generic phrases like "less flexible" or "harder to use."
+- Objections must be phrases a real prospect would actually say — short, conversational, skeptical. Counters must be under 25 words, confident, and reframe the objection rather than argue against it.
+- The trap-setting question must be a single question the sales rep can ask the prospect that EXPOSES the competitor's weakness without mentioning the competitor by name. It should make the prospect realize the gap themselves.
+- The winning message must be a single sentence under 12 words, structured as contrast ("X does A. We do B."). It is the one line the rep repeats at the end of the call. Make it memorable.
+- Do not hedge. Do not add disclaimers. This is ammunition, not analysis.
+
+Return ONLY this JSON, no preamble:
+
+{
+  "competitor_name": "",
+  "weaknesses": [
+    { "area": "", "detail": "" },
+    { "area": "", "detail": "" },
+    { "area": "", "detail": "" }
+  ],
+  "objections": [
+    { "objection": "", "counter": "" },
+    { "objection": "", "counter": "" }
+  ],
+  "trap_question": "",
+  "winning_message": ""
+}"""
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -491,7 +519,8 @@ STEP_LABELS = [
     "Positioning comparison",
     "Gap identification",
     "Strategy engine",
-    "Target account generation"
+    "Target account generation",
+    "Generating battlecards"
 ]
 
 
@@ -562,7 +591,7 @@ async def run_pipeline(job_id: str, url: str):
         await log_usage(job_id, 5, step5_result["tokens_used"])
         logger.info(f"Step 5 complete: Strategy generated")
         
-        # STEP 7: Target Account Generation
+        # STEP 6: Target Account Generation
         await update_job_status(job_id, "running", current_step=6)
         step6_context = f"GTM strategy: {json.dumps(strategy, indent=2)}\n\nCompany profile: {json.dumps(company_profile, indent=2)}"
         step6_result = await call_openai(
@@ -573,6 +602,49 @@ async def run_pipeline(job_id: str, url: str):
         target_accounts = step6_result["data"]
         await log_usage(job_id, 6, step6_result["tokens_used"])
         logger.info(f"Step 6 complete: {len(target_accounts)} target accounts generated")
+        
+        # STEP 7: Battlecard Generation (parallel for all competitors)
+        await update_job_status(job_id, "running", current_step=7)
+        logger.info(f"Step 7 starting: Generating {len(competitors)} battlecards in parallel")
+        
+        async def generate_single_battlecard(competitor: dict) -> dict:
+            """Generate battlecard for a single competitor"""
+            try:
+                context = f"Subject company profile: {json.dumps(company_profile, indent=2)}\n\nCompetitor to beat: {json.dumps(competitor, indent=2)}\n\nOur GTM strategy: {json.dumps(strategy, indent=2)}"
+                
+                result = await call_openai(
+                    PROMPT_7_BATTLECARD,
+                    context,
+                    max_tokens=600
+                )
+                
+                return result["data"]
+            except Exception as e:
+                logger.error(f"Failed to generate battlecard for {competitor.get('name', 'unknown')}: {str(e)}")
+                # Return a fallback battlecard structure
+                return {
+                    "competitor_name": competitor.get("name", "Unknown"),
+                    "weaknesses": [
+                        {"area": "Generation failed", "detail": "Unable to generate battlecard"},
+                        {"area": "", "detail": ""},
+                        {"area": "", "detail": ""}
+                    ],
+                    "objections": [
+                        {"objection": "", "counter": ""},
+                        {"objection": "", "counter": ""}
+                    ],
+                    "trap_question": "",
+                    "winning_message": ""
+                }
+        
+        # Generate all battlecards in parallel using asyncio.gather
+        battlecard_tasks = [generate_single_battlecard(comp) for comp in competitors]
+        battlecards = await asyncio.gather(*battlecard_tasks)
+        
+        # Log total tokens used for Step 7 (approximate)
+        total_step7_tokens = len(competitors) * 600  # Rough estimate
+        await log_usage(job_id, 7, total_step7_tokens)
+        logger.info(f"Step 7 complete: Generated {len(battlecards)} battlecards")
         
         # Compile final result
         final_result = {
@@ -585,11 +657,12 @@ async def run_pipeline(job_id: str, url: str):
             "comparison": comparison,
             "gaps": gaps,
             "strategy": strategy,
-            "target_accounts": target_accounts
+            "target_accounts": target_accounts,
+            "battlecards": battlecards
         }
         
         # Mark job as complete
-        await update_job_status(job_id, "complete", current_step=6, result=final_result)
+        await update_job_status(job_id, "complete", current_step=7, result=final_result)
         logger.info(f"Pipeline complete for job {job_id}")
         
     except HTTPException as e:
@@ -663,14 +736,14 @@ async def get_analysis_status(job_id: str):
     # Determine step label
     current_step = job.get("current_step", 0)
     step_label = None
-    if current_step > 0 and current_step <= 6:
+    if current_step > 0 and current_step <= 7:
         step_label = STEP_LABELS[current_step - 1]
     
     response = JobStatusResponse(
         job_id=job_id,
         status=job["status"],
         current_step=current_step if job["status"] == "running" else None,
-        total_steps=6,
+        total_steps=7,
         step_label=step_label,
         result=job.get("result"),
         failed_at_step=job.get("failed_at_step"),
