@@ -12,8 +12,7 @@ import uuid
 from datetime import datetime, timezone
 import asyncio
 from emergentintegrations.llm.chat import LlmChat, UserMessage
-import requests
-from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
 import json
 import traceback
 
@@ -252,65 +251,75 @@ Return ONLY this JSON array, no preamble:
 # ═══════════════════════════════════════════════════════════════
 
 async def scrape_website(url: str) -> str:
-    """Scrape website using requests + BeautifulSoup fallback"""
+    """Scrape website using Playwright for JavaScript-rendered sites"""
     try:
-        logger.info(f"Scraping URL: {url}")
+        logger.info(f"Scraping URL with Playwright: {url}")
         
-        # Add headers to mimic a real browser
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        }
-        
-        # Make request with timeout
-        response = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
-        response.raise_for_status()
-        
-        # Parse with BeautifulSoup
-        soup = BeautifulSoup(response.text, 'lxml')
-        
-        # Remove script and style elements
-        for script in soup(["script", "style", "nav", "footer", "header"]):
-            script.decompose()
-        
-        # Try to find main content first
-        main_content = soup.find('main') or soup.find('article') or soup.find('body')
-        
-        # Get text and clean it
-        text = main_content.get_text() if main_content else soup.get_text()
-        lines = (line.strip() for line in text.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-        text = ' '.join(chunk for chunk in chunks if chunk)
-        
-        # Cap at 8000 characters
-        scraped_text = text[:8000]
-        
-        if len(scraped_text) < 100:
-            raise Exception("Not enough content scraped (less than 100 characters)")
-        
-        logger.info(f"Successfully scraped {len(scraped_text)} characters from {url}")
-        return scraped_text
-        
+        async with async_playwright() as p:
+            # Launch browser in headless mode
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox']
+            )
+            
+            # Create new page
+            page = await browser.new_page()
+            
+            try:
+                # Navigate to URL with timeout
+                await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                
+                # Wait for page to render (give JS time to execute)
+                await page.wait_for_timeout(3000)
+                
+                # Remove unnecessary elements
+                await page.evaluate("""
+                    () => {
+                        const selectorsToRemove = ['script', 'style', 'nav', 'footer', 'header', 'iframe', 'noscript'];
+                        selectorsToRemove.forEach(selector => {
+                            document.querySelectorAll(selector).forEach(el => el.remove());
+                        });
+                    }
+                """)
+                
+                # Get text content from main content area or body
+                text = await page.evaluate("""
+                    () => {
+                        const main = document.querySelector('main') || 
+                                    document.querySelector('article') || 
+                                    document.querySelector('[role="main"]') ||
+                                    document.querySelector('.main-content') ||
+                                    document.querySelector('#main') ||
+                                    document.body;
+                        
+                        // Get text and clean it
+                        const text = main.innerText || main.textContent;
+                        
+                        // Remove extra whitespace
+                        return text.replace(/\\s+/g, ' ').trim();
+                    }
+                """)
+                
+                await browser.close()
+                
+                # Cap at 8000 characters
+                scraped_text = text[:8000]
+                
+                if len(scraped_text) < 100:
+                    raise Exception("Not enough content scraped (less than 100 characters)")
+                
+                logger.info(f"Successfully scraped {len(scraped_text)} characters from {url}")
+                logger.info(f"First 500 chars: {scraped_text[:500]}")
+                
+                return scraped_text
+                
+            except Exception as e:
+                await browser.close()
+                raise e
+                
     except Exception as e:
-        logger.error(f"Scraping failed for {url}: {str(e)}")
-        # Return a fallback message for testing
-        fallback = f"""
-        Company Website: {url}
-        
-        This is a modern SaaS platform focused on B2B productivity and collaboration.
-        Our product helps teams work more efficiently with AI-powered features.
-        We serve small to medium-sized businesses across multiple industries.
-        Pricing starts at $10 per user per month with a free tier available.
-        Our positioning emphasizes simplicity, speed, and powerful integrations.
-        Founded in 2023, we're building the next generation of workplace tools.
-        """
-        logger.info(f"Using fallback content for {url}")
-        return fallback
+        logger.error(f"Playwright scraping failed for {url}: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"scrape_failed: Could not reach the provided URL - {str(e)}")
 
 
 # ═══════════════════════════════════════════════════════════════
