@@ -141,10 +141,28 @@ body{font-family:var(--sans);background:var(--surface);color:var(--on-surface);f
   font-family:var(--mono);
 }
 
+.strategy-block-hero{
+  background:#f4f2fd;
+  padding:40px 48px;
+  box-shadow:var(--shadow);
+  border-left:4px solid var(--primary);
+}
+
+.strategy-stamp-hero{
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:0.15em;
+  text-transform:uppercase;
+  color:var(--primary);
+  margin-bottom:28px;
+  font-weight:600;
+}
+
 @media(max-width:560px){
   .snap-grid{grid-template-columns:repeat(2,1fr)}
   .gap-row{grid-template-columns:1fr}
   .strategy-row{grid-template-columns:1fr;gap:6px}
   .acc-grid{grid-template-columns:1fr}
   .tabs .tab{padding:9px 10px;font-size:11px}
+  .strategy-block-hero{padding:28px 24px}
 }

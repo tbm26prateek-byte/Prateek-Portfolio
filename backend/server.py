@@ -685,6 +685,31 @@ async def root():
     return {"message": "RivalIQ API v1.0"}
 
 
+@api_router.post("/battlecard")
+async def generate_battlecard(request: dict):
+    """Generate competitive battlecard (placeholder - prompt to be provided)"""
+    # Placeholder - user will provide the actual prompt
+    competitor_name = request.get("competitor_name", "Competitor")
+    
+    # Mock response for now
+    return {
+        "competitor_name": competitor_name,
+        "weaknesses": [
+            "[Battlecard feature ready - awaiting AI prompt from user]",
+            "The backend infrastructure is complete",
+            "Provide the battlecard prompt to activate this feature"
+        ],
+        "objections": [
+            {
+                "objection": "Waiting for prompt",
+                "counter": "Once you provide the battlecard generation prompt, this will create real competitive intelligence"
+            }
+        ],
+        "trap_question": "Ready to receive your battlecard prompt for this competitor.",
+        "winning_message": "Backend endpoint is ready. Frontend modal is ready. Just need the AI prompt to make it live."
+    }
+
+
 # Include the router in the main app
 app.include_router(api_router)
 

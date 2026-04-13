@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import "./App.css";
 import axios from "axios";
+import jsPDF from "jspdf";
+import "jspdf-autotable";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -14,6 +16,25 @@ const STEP_LABELS = [
   "Target account generation"
 ];
 
+// Helper function to format ARR values
+const formatARR = (value) => {
+  if (!value) return "—";
+  
+  // Extract numbers from string
+  const numMatch = value.match(/[\d,]+/);
+  if (!numMatch) return value;
+  
+  const num = parseInt(numMatch[0].replace(/,/g, ''));
+  
+  if (num >= 1000000) {
+    return `$${(num / 1000000).toFixed(1)}M ARR`;
+  } else if (num >= 1000) {
+    return `$${(num / 1000).toFixed(0)}K ARR`;
+  }
+  
+  return `$${num} ARR`;
+};
+
 function App() {
   const [screen, setScreen] = useState("home"); // home | loading | results
   const [url, setUrl] = useState("");
@@ -23,6 +44,9 @@ function App() {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [battlecardData, setBattlecardData] = useState(null);
+  const [showBattlecard, setShowBattlecard] = useState(false);
+  const [loadingBattlecard, setLoadingBattlecard] = useState(false);
   const pollingRef = useRef(null);
 
   // Start analysis
@@ -117,6 +141,271 @@ function App() {
     setError(null);
     setActiveTab("overview");
     setIsSubmitting(false);
+  };
+
+  const exportToPDF = () => {
+    if (!result) return;
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    let yPos = 20;
+
+    // Helper to add new page if needed
+    const checkPageBreak = (requiredSpace = 20) => {
+      if (yPos + requiredSpace > doc.internal.pageSize.getHeight() - 20) {
+        doc.addPage();
+        yPos = 20;
+        return true;
+      }
+      return false;
+    };
+
+    // Title
+    doc.setFontSize(24);
+    doc.setTextColor(87, 78, 177); // Primary color
+    doc.text("RivalIQ Strategy Report", margin, yPos);
+    yPos += 10;
+
+    // Company name and date
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    doc.text(result.company_profile?.company_name || "Company", margin, yPos);
+    yPos += 6;
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    doc.text(new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), margin, yPos);
+    yPos += 15;
+
+    // Company Snapshot
+    checkPageBreak(40);
+    doc.setFontSize(14);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Company Snapshot", margin, yPos);
+    yPos += 8;
+
+    const cp = result.company_profile;
+    const snapshotData = [
+      ["Product", cp?.product || "—"],
+      ["Target Customer", cp?.target_customer || "—"],
+      ["Pricing Model", cp?.pricing_model || "—"],
+      ["Positioning", cp?.positioning || "—"],
+      ["Industry", cp?.industry || "—"]
+    ];
+
+    doc.autoTable({
+      startY: yPos,
+      head: [],
+      body: snapshotData,
+      theme: 'plain',
+      styles: { fontSize: 9, cellPadding: 3 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }
+    });
+    yPos = doc.lastAutoTable.finalY + 12;
+
+    // Strategic Gaps
+    checkPageBreak(40);
+    doc.setFontSize(14);
+    doc.text("Strategic Gaps", margin, yPos);
+    yPos += 8;
+
+    if (result.gaps?.underserved_opportunities?.length > 0) {
+      doc.setFontSize(11);
+      doc.setTextColor(0, 110, 32);
+      doc.text("Opportunities", margin, yPos);
+      yPos += 6;
+      doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
+      result.gaps.underserved_opportunities.forEach((opp, i) => {
+        checkPageBreak(10);
+        doc.text(`${i + 1}. ${opp.opportunity}`, margin + 3, yPos);
+        yPos += 5;
+      });
+      yPos += 5;
+    }
+
+    // Competitors Table
+    checkPageBreak(40);
+    doc.setFontSize(14);
+    doc.text("Competitors", margin, yPos);
+    yPos += 8;
+
+    const compData = result.competitors?.map(c => [
+      c.name,
+      c.target_segment,
+      c.price_range,
+      c.positioning
+    ]) || [];
+
+    doc.autoTable({
+      startY: yPos,
+      head: [['Company', 'Target Segment', 'Price Range', 'Positioning']],
+      body: compData,
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 3 },
+      headStyles: { fillColor: [87, 78, 177], textColor: 255 }
+    });
+    yPos = doc.lastAutoTable.finalY + 12;
+
+    // Strategy
+    doc.addPage();
+    yPos = 20;
+    doc.setFontSize(16);
+    doc.setTextColor(87, 78, 177);
+    doc.text("GTM STRATEGY", margin, yPos);
+    yPos += 10;
+
+    const strat = result.strategy;
+    doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Where to Play", margin, yPos);
+    yPos += 6;
+    doc.setFontSize(9);
+    doc.setTextColor(50, 50, 50);
+    const whereText = `${strat?.where_to_play?.segment}, ${strat?.where_to_play?.geography}`;
+    doc.text(whereText, margin + 3, yPos, { maxWidth: pageWidth - 2 * margin });
+    yPos += 10;
+
+    doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
+    doc.text("How to Win", margin, yPos);
+    yPos += 6;
+    doc.setFontSize(9);
+    doc.setTextColor(50, 50, 50);
+    const howText = strat?.how_to_win?.differentiation || "—";
+    doc.text(howText, margin + 3, yPos, { maxWidth: pageWidth - 2 * margin });
+    yPos += 10;
+
+    doc.setFontSize(11);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Positioning Statement", margin, yPos);
+    yPos += 6;
+    doc.setFontSize(9);
+    doc.setTextColor(50, 50, 50);
+    const posText = strat?.how_to_win?.positioning_statement || "—";
+    const posLines = doc.splitTextToSize(posText, pageWidth - 2 * margin);
+    doc.text(posLines, margin + 3, yPos);
+    yPos += posLines.length * 5 + 10;
+
+    // Target Accounts
+    checkPageBreak(40);
+    doc.setFontSize(14);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Target Accounts", margin, yPos);
+    yPos += 8;
+
+    result.target_accounts?.forEach((acc, i) => {
+      checkPageBreak(30);
+      doc.setFontSize(11);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`${i + 1}. ${acc.company} (${acc.country})`, margin, yPos);
+      yPos += 6;
+      doc.setFontSize(9);
+      doc.setTextColor(0, 110, 32);
+      doc.text(formatARR(acc.deal_potential_arr), margin + 3, yPos);
+      yPos += 5;
+      doc.setFontSize(8);
+      doc.setTextColor(50, 50, 50);
+      const whyLines = doc.splitTextToSize(acc.why_relevant, pageWidth - 2 * margin - 3);
+      doc.text(whyLines, margin + 3, yPos);
+      yPos += whyLines.length * 4 + 8;
+    });
+
+    // Save PDF
+    const fileName = `RivalIQ_${result.company_profile?.company_name?.replace(/\s+/g, '_') || 'Strategy'}_${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(fileName);
+  };
+
+  const generateBattlecard = async (competitorName) => {
+    setLoadingBattlecard(true);
+    try {
+      const response = await axios.post(`${API}/battlecard`, {
+        competitor_name: competitorName,
+        company_profile: result.company_profile,
+        competitors: result.competitors,
+        strategy: result.strategy
+      });
+      
+      setBattlecardData(response.data);
+      setShowBattlecard(true);
+    } catch (err) {
+      console.error("Battlecard generation failed:", err);
+      alert("Failed to generate battlecard. Please try again.");
+    } finally {
+      setLoadingBattlecard(false);
+    }
+  };
+
+  const exportBattlecardToPDF = () => {
+    if (!battlecardData) return;
+
+    const doc = new jsPDF();
+    const margin = 15;
+    let yPos = 20;
+
+    // Title
+    doc.setFontSize(20);
+    doc.setTextColor(87, 78, 177);
+    doc.text(`Battlecard: ${battlecardData.competitor_name}`, margin, yPos);
+    yPos += 10;
+
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    doc.text(new Date().toLocaleDateString(), margin, yPos);
+    yPos += 15;
+
+    // Weaknesses
+    doc.setFontSize(14);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Their Weaknesses vs Us", margin, yPos);
+    yPos += 8;
+
+    battlecardData.weaknesses?.forEach((w, i) => {
+      doc.setFontSize(9);
+      doc.text(`${i + 1}. ${w}`, margin + 3, yPos);
+      yPos += 6;
+    });
+    yPos += 8;
+
+    // Objections
+    doc.setFontSize(14);
+    doc.text("Common Objections & Counters", margin, yPos);
+    yPos += 8;
+
+    battlecardData.objections?.forEach((obj, i) => {
+      doc.setFontSize(10);
+      doc.setTextColor(186, 26, 26);
+      doc.text(`Objection: ${obj.objection}`, margin + 3, yPos);
+      yPos += 6;
+      doc.setFontSize(9);
+      doc.setTextColor(0, 110, 32);
+      const counterLines = doc.splitTextToSize(`Counter: ${obj.counter}`, doc.internal.pageSize.getWidth() - 2 * margin);
+      doc.text(counterLines, margin + 3, yPos);
+      yPos += counterLines.length * 5 + 8;
+    });
+
+    // Trap Question
+    yPos += 5;
+    doc.setFontSize(14);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Trap-Setting Question", margin, yPos);
+    yPos += 8;
+    doc.setFontSize(9);
+    const trapLines = doc.splitTextToSize(battlecardData.trap_question || "", doc.internal.pageSize.getWidth() - 2 * margin);
+    doc.text(trapLines, margin + 3, yPos);
+    yPos += trapLines.length * 5 + 10;
+
+    // Winning Message
+    doc.setFontSize(14);
+    doc.setTextColor(87, 78, 177);
+    doc.text("Our Winning Message", margin, yPos);
+    yPos += 8;
+    doc.setFontSize(9);
+    doc.setTextColor(0, 0, 0);
+    const msgLines = doc.splitTextToSize(battlecardData.winning_message || "", doc.internal.pageSize.getWidth() - 2 * margin);
+    doc.text(msgLines, margin + 3, yPos);
+
+    doc.save(`Battlecard_${battlecardData.competitor_name}.pdf`);
   };
 
   return (
@@ -247,9 +536,14 @@ function App() {
                 {result.company_profile?.target_customer || "N/A"}
               </div>
             </div>
-            <button className="btn-ghost" onClick={resetApp}>
-              ↩ New analysis
-            </button>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button className="btn-ghost" onClick={exportToPDF}>
+                ↓ Export PDF
+              </button>
+              <button className="btn-ghost" onClick={resetApp}>
+                ↩ New analysis
+              </button>
+            </div>
           </div>
 
           <div className="tabs">
@@ -289,7 +583,7 @@ function App() {
           {/* TAB: COMPETITORS */}
           {activeTab === "competitors" && (
             <div className="tab-panel active">
-              <CompetitorsTab result={result} />
+              <CompetitorsTab result={result} onGenerateBattlecard={generateBattlecard} loadingBattlecard={loadingBattlecard} />
             </div>
           )}
 
@@ -307,6 +601,15 @@ function App() {
             </div>
           )}
         </div>
+      )}
+
+      {/* BATTLECARD MODAL */}
+      {showBattlecard && (
+        <BattlecardModal 
+          battlecardData={battlecardData}
+          onClose={() => setShowBattlecard(false)}
+          onExport={exportBattlecardToPDF}
+        />
       )}
     </div>
   );
@@ -397,8 +700,8 @@ function OverviewTab({ result }) {
         <div className="label" style={{ marginBottom: "12px" }}>
           Recommended strategy
         </div>
-        <div className="strategy-block">
-          <div className="strategy-stamp">Decision · GTM Engine v1</div>
+        <div className="strategy-block-hero">
+          <div className="strategy-stamp-hero">THE DECISION</div>
           <div className="strategy-row">
             <div className="strat-key">Where to play</div>
             <div>
@@ -428,7 +731,7 @@ function OverviewTab({ result }) {
   );
 }
 
-function CompetitorsTab({ result }) {
+function CompetitorsTab({ result, onGenerateBattlecard, loadingBattlecard }) {
   const profile = result.company_profile || {};
   const competitors = result.competitors || [];
   const comparison = result.comparison || {};
@@ -446,7 +749,7 @@ function CompetitorsTab({ result }) {
               <th>ICP</th>
               <th>Price / seat</th>
               <th>Core message</th>
-              <th></th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -465,7 +768,26 @@ function CompetitorsTab({ result }) {
                 <td>{c.target_segment}</td>
                 <td>{c.price_range}</td>
                 <td>{c.positioning}</td>
-                <td></td>
+                <td>
+                  <button 
+                    onClick={() => onGenerateBattlecard(c.name)}
+                    disabled={loadingBattlecard}
+                    style={{
+                      background: 'var(--primary-container)',
+                      color: 'var(--primary)',
+                      border: 'none',
+                      padding: '4px 10px',
+                      borderRadius: '0.25rem',
+                      fontSize: '11px',
+                      fontFamily: 'var(--mono)',
+                      cursor: loadingBattlecard ? 'not-allowed' : 'pointer',
+                      opacity: loadingBattlecard ? 0.5 : 1,
+                      letterSpacing: '0.03em'
+                    }}
+                  >
+                    {loadingBattlecard ? '...' : '→ Generate Battlecard'}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -631,7 +953,7 @@ function AccountsTab({ result }) {
           <div key={i} className="account-card">
             <div className="acc-top">
               <span className="acc-name">{a.company}</span>
-              <span className="acc-arr">{a.deal_potential_arr}</span>
+              <span className="acc-arr">{formatARR(a.deal_potential_arr)}</span>
             </div>
             <div className="acc-why">{a.why_relevant}</div>
             <div className="acc-grid">
@@ -650,6 +972,159 @@ function AccountsTab({ result }) {
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// Battlecard Modal Component
+function BattlecardModal({ battlecardData, onClose, onExport }) {
+  if (!battlecardData) return null;
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0,0,0,0.6)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 9999,
+      padding: '20px'
+    }}>
+      <div style={{
+        background: 'var(--surface-lowest)',
+        maxWidth: '700px',
+        width: '100%',
+        maxHeight: '90vh',
+        overflow: 'auto',
+        borderRadius: '0.25rem',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+      }}>
+        <div style={{
+          padding: '28px 32px',
+          borderBottom: '2px solid var(--outline-faint)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start'
+        }}>
+          <div>
+            <div className="label" style={{ marginBottom: '8px' }}>COMPETITIVE BATTLECARD</div>
+            <h2 style={{ fontSize: '22px', fontWeight: '600', margin: 0, letterSpacing: '-0.02em' }}>
+              {battlecardData.competitor_name}
+            </h2>
+          </div>
+          <button 
+            onClick={onClose}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '28px',
+              cursor: 'pointer',
+              color: 'var(--on-surface-muted)',
+              lineHeight: 1,
+              padding: 0
+            }}
+          >×</button>
+        </div>
+        
+        <div style={{ padding: '32px' }}>
+          {/* Weaknesses */}
+          <div style={{ marginBottom: '28px' }}>
+            <div className="label" style={{ marginBottom: '14px', color: 'var(--error)' }}>
+              THEIR WEAKNESSES VS US
+            </div>
+            <ol style={{ paddingLeft: '24px', margin: 0 }}>
+              {battlecardData.weaknesses?.map((w, i) => (
+                <li key={i} style={{ fontSize: '14px', marginBottom: '10px', color: 'var(--on-surface)', lineHeight: '1.6' }}>
+                  {w}
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          {/* Objections */}
+          <div style={{ marginBottom: '28px' }}>
+            <div className="label" style={{ marginBottom: '14px' }}>COMMON OBJECTIONS & COUNTERS</div>
+            {battlecardData.objections?.map((obj, i) => (
+              <div key={i} style={{
+                background: 'var(--surface-container)',
+                padding: '18px',
+                marginBottom: '14px',
+                borderRadius: '0.25rem',
+                borderLeft: '3px solid var(--error)'
+              }}>
+                <div style={{
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: 'var(--error)',
+                  marginBottom: '10px',
+                  fontStyle: 'italic'
+                }}>
+                  "{obj.objection}"
+                </div>
+                <div style={{
+                  fontSize: '13px',
+                  color: 'var(--on-surface-variant)',
+                  lineHeight: '1.7'
+                }}>
+                  <strong style={{ color: 'var(--secondary)' }}>→</strong> {obj.counter}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Trap Question */}
+          <div style={{ marginBottom: '28px' }}>
+            <div className="label" style={{ marginBottom: '14px', color: 'var(--primary)' }}>
+              TRAP-SETTING QUESTION
+            </div>
+            <div style={{
+              background: 'var(--primary-container)',
+              padding: '20px',
+              borderRadius: '0.25rem',
+              fontSize: '14px',
+              fontStyle: 'italic',
+              color: 'var(--on-surface)',
+              lineHeight: '1.6',
+              borderLeft: '3px solid var(--primary)'
+            }}>
+              {battlecardData.trap_question}
+            </div>
+          </div>
+
+          {/* Winning Message */}
+          <div style={{ marginBottom: '32px' }}>
+            <div className="label" style={{ marginBottom: '14px', color: 'var(--secondary)' }}>
+              OUR WINNING MESSAGE
+            </div>
+            <div style={{
+              background: 'rgba(0,110,32,0.08)',
+              padding: '20px',
+              borderRadius: '0.25rem',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: 'var(--on-surface)',
+              lineHeight: '1.7',
+              borderLeft: '3px solid var(--secondary)'
+            }}>
+              {battlecardData.winning_message}
+            </div>
+          </div>
+
+          {/* Footer Buttons */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '20px', borderTop: '1px solid var(--outline-faint)' }}>
+            <button className="btn-ghost" onClick={onClose}>
+              Close
+            </button>
+            <button className="btn-primary" onClick={onExport}>
+              ↓ Export PDF
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
