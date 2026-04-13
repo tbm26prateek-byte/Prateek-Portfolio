@@ -269,46 +269,94 @@ async def scrape_website(url: str) -> str:
                 # Navigate to URL with timeout
                 await page.goto(url, wait_until='domcontentloaded', timeout=30000)
                 
-                # Wait for page to render (give JS time to execute)
-                await page.wait_for_timeout(3000)
+                # Wait for page to render (increased to 6s for JS execution)
+                await page.wait_for_timeout(6000)
+                
+                # Scroll to bottom to trigger lazy-loaded content
+                await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+                await page.wait_for_timeout(2000)
                 
                 # Remove unnecessary elements
                 await page.evaluate("""
                     () => {
-                        const selectorsToRemove = ['script', 'style', 'nav', 'footer', 'header', 'iframe', 'noscript'];
+                        const selectorsToRemove = ['script', 'style', 'iframe', 'noscript'];
                         selectorsToRemove.forEach(selector => {
                             document.querySelectorAll(selector).forEach(el => el.remove());
                         });
                     }
                 """)
                 
-                # Get text content from main content area or body
+                # Try to get text content from main content area first
                 text = await page.evaluate("""
                     () => {
                         const main = document.querySelector('main') || 
                                     document.querySelector('article') || 
                                     document.querySelector('[role="main"]') ||
                                     document.querySelector('.main-content') ||
-                                    document.querySelector('#main') ||
-                                    document.body;
+                                    document.querySelector('#main');
                         
-                        // Get text and clean it
-                        const text = main.innerText || main.textContent;
-                        
-                        // Remove extra whitespace
-                        return text.replace(/\\s+/g, ' ').trim();
+                        if (main) {
+                            const text = main.innerText || main.textContent;
+                            return text.replace(/\\s+/g, ' ').trim();
+                        }
+                        return '';
                     }
                 """)
                 
+                # If main content is too short, fall back to entire body
+                if len(text) < 1000:
+                    logger.info("Main content too short, falling back to document.body")
+                    text = await page.evaluate("""
+                        () => {
+                            const text = document.body.innerText || document.body.textContent;
+                            return text.replace(/\\s+/g, ' ').trim();
+                        }
+                    """)
+                
+                main_content = text[:8000]
+                logger.info(f"Scraped {len(text)} chars from main page")
+                
+                # Try to scrape the /pricing page as well
+                pricing_content = ""
+                try:
+                    from urllib.parse import urljoin
+                    pricing_url = urljoin(url, '/pricing')
+                    logger.info(f"Attempting to scrape pricing page: {pricing_url}")
+                    
+                    await page.goto(pricing_url, wait_until='domcontentloaded', timeout=15000)
+                    await page.wait_for_timeout(4000)
+                    
+                    # Scroll pricing page
+                    await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+                    await page.wait_for_timeout(2000)
+                    
+                    pricing_text = await page.evaluate("""
+                        () => {
+                            const text = document.body.innerText || document.body.textContent;
+                            return text.replace(/\\s+/g, ' ').trim();
+                        }
+                    """)
+                    
+                    pricing_content = pricing_text[:2000]  # Cap pricing at 2000 chars
+                    logger.info(f"Scraped {len(pricing_text)} chars from pricing page")
+                    
+                except Exception as e:
+                    logger.warning(f"Could not scrape pricing page: {str(e)}")
+                
                 await browser.close()
                 
-                # Cap at 8000 characters
-                scraped_text = text[:8000]
+                # Combine main content and pricing content
+                combined_text = main_content
+                if pricing_content and len(pricing_content) > 100:
+                    combined_text += " PRICING INFORMATION: " + pricing_content
+                
+                # Cap final output at 8000 characters
+                scraped_text = combined_text[:8000]
                 
                 if len(scraped_text) < 100:
                     raise Exception("Not enough content scraped (less than 100 characters)")
                 
-                logger.info(f"Successfully scraped {len(scraped_text)} characters from {url}")
+                logger.info(f"Total scraped content: {len(scraped_text)} characters")
                 logger.info(f"First 500 chars: {scraped_text[:500]}")
                 
                 return scraped_text
@@ -319,7 +367,10 @@ async def scrape_website(url: str) -> str:
                 
     except Exception as e:
         logger.error(f"Playwright scraping failed for {url}: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"scrape_failed: Could not reach the provided URL - {str(e)}")
+        raise HTTPException(
+            status_code=400, 
+            detail="scrape_failed"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════

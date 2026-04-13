@@ -44,7 +44,19 @@ function App() {
       startPolling(job_id);
       
     } catch (err) {
-      setError(err.response?.data?.detail || "Failed to start analysis");
+      const errorDetail = err.response?.data?.detail || "";
+      let userMessage = "Failed to start analysis";
+      
+      // Show user-friendly message for scraping errors
+      if (errorDetail.includes("scrape_failed") || errorDetail.includes("Could not reach")) {
+        userMessage = "We couldn't read this URL — it may require a login or block automated access. Try your main public-facing homepage (e.g. yourcompany.com, not app.yourcompany.com).";
+      } else if (errorDetail.includes("invalid_url")) {
+        userMessage = "Please enter a valid URL starting with http:// or https://";
+      } else if (errorDetail) {
+        userMessage = errorDetail;
+      }
+      
+      setError(userMessage);
       setIsSubmitting(false);
     }
   };
@@ -63,7 +75,17 @@ function App() {
           setScreen("results");
           stopPolling();
         } else if (data.status === "failed") {
-          setError(data.error || "Analysis failed");
+          const errorDetail = data.error || "Analysis failed";
+          let userMessage = errorDetail;
+          
+          // Show user-friendly message for scraping errors
+          if (errorDetail.includes("scrape_failed") || errorDetail.includes("Could not reach")) {
+            userMessage = "We couldn't read this URL — it may require a login or block automated access. Try your main public-facing homepage (e.g. yourcompany.com, not app.yourcompany.com).";
+          } else if (errorDetail.includes("openai")) {
+            userMessage = "AI processing failed. Please try again.";
+          }
+          
+          setError(userMessage);
           setScreen("home");
           stopPolling();
         }
