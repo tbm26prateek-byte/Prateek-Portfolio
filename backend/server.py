@@ -158,10 +158,17 @@ Given the company profile, its competitors, and the positioning comparison, iden
 
 3. UNDERSERVED OPPORTUNITIES — 3 specific gaps where: competition is weak OR absent, willingness to pay is high, and the subject company could realistically win within 90 days.
 
-Rules:
-- Every item must be 1–2 sentences. No bullet fragments.
-- Opportunities must be actionable within 90 days — no "build AI" or "enter enterprise."
-- Prioritize the opportunities by potential impact (index 0 = highest).
+ANTI-GENERIC RULES (failing these = invalid output):
+- Never use the phrases: "focus on," "leverage," "develop a strategy," "target the X market," "tailor solutions," "enhance capabilities."
+- Every noun must be as specific as possible. "Media" fails. "Direct-to-consumer streaming platforms under $500M ARR" passes.
+- If a human strategist would have written what you wrote in under 30 seconds, it is too generic. Rewrite it.
+
+SPECIFICITY RULES FOR GAPS:
+- Each weakness must name the specific competitor winning in that area AND explain WHY they win. BAD: "Weak reporting." GOOD: "Zuora's financial reporting is deeper because it was built for public-company SOX compliance — the subject lacks audit trails."
+- Each overcrowded_area must list 3+ specific competitors currently fighting there with overlapping feature sets.
+- Each underserved_opportunity must cite WHY competitors are NOT there — too small, too hard, too regulated, too new? A gap without a "because" is not a gap, it is an observation. Rewrite until every gap has a "because."
+
+Every item must be 1–2 sentences. No bullet fragments. Opportunities must be actionable within 90 days. Prioritize opportunities by potential impact (index 0 = highest).
 
 Return ONLY this JSON, no preamble:
 
@@ -183,13 +190,22 @@ Based on the company profile, competitive landscape, and gap analysis provided, 
 
 This is NOT a summary of the data. This is a DECISION.
 
-Rules:
-- "Where to play" must name a specific segment, geography, and persona — not categories.
-- "Why" must reference the gap analysis directly — cite specific opportunities by name.
-- "How to win" must be a differentiation strategy executable in under 90 days.
-- "Positioning statement" must be one sentence, under 20 words, usable in a cold email subject line.
-- "Confidence" is your honest assessment from 0–100 based on how clear the data is.
-- Do not hedge. Do not say "it depends." Make the call.
+ANTI-GENERIC RULES (failing these = invalid output):
+- Never use the phrases: "focus on," "leverage," "develop a strategy," "target the X market," "tailor solutions," "enhance capabilities."
+- If a human strategist would have written what you wrote in under 30 seconds, it is too generic.
+
+SPECIFICITY FLOOR:
+- "segment" must name a sub-segment, not a category. BAD: "SaaS companies." GOOD: "Series B-C vertical SaaS companies in logistics, 50-250 employees."
+- "geography" must be a city, metro, or specific region when possible — not a continent.
+- "persona" must include title, seniority, AND a behavioral signal. BAD: "Marketing Manager." GOOD: "Head of Growth at Series B stage, reports to CEO, owns CAC target, previously used 2+ competing tools."
+- "positioning_statement" must be contrarian or counter-positioned. BAD: "The best X for Y." GOOD: "The only X that does NOT do Y."
+- "differentiation" must name what the company will NOT do, not just what it will do. Real differentiation is subtraction.
+- "ninety_day_actions" must name specific channels, events, publications, or communities. BAD: "Develop marketing campaign." GOOD: "Sponsor NAB Show 2026 booth and publish 3 case studies in Modern Restaurant Management magazine."
+- "pricing_recommendation.rationale" must cite a competitor's price as a comparable. BAD: "Premium pricing signals quality." GOOD: "Zuora starts at $1,500/mo — positioning at $499/mo undercuts them while signaling higher value than Recurly's $249/mo."
+- "why" must reference the gap analysis by name.
+- "confidence" is your honest 0–100 assessment. Do not hedge. Make the call.
+
+Before outputting, ask yourself: "Could this output apply to 100 different SaaS companies, or just this one?" If it could apply to many, rewrite until it could only apply to this one.
 
 Return ONLY this JSON, no preamble:
 
@@ -222,14 +238,24 @@ Return ONLY this JSON, no preamble:
 
 PROMPT_6_TARGET_ACCOUNTS = """You are a B2B sales strategist. Based on the GTM strategy provided, identify exactly 5 real, named target companies to pursue this week.
 
-Rules:
-- All 5 companies must actually exist.
-- Each company must fit the target segment, geography, and persona from the strategy.
-- "Why relevant" must connect directly to the strategy's differentiation angle — not generic fit.
-- "Deal potential" must be a realistic ARR estimate based on company size × price point from the strategy.
-- "Timing signal" must be a specific observable signal (hiring, funding, expansion, public complaint) — not "they might need this."
-- "Approach" must be a one-sentence cold outreach angle specific to this company — something a sales rep can use today.
+CRITICAL EXCLUSION RULES:
+- Target accounts must be POTENTIAL CUSTOMERS, never competitors.
+- Do NOT recommend: direct competitors, indirect competitors, or any company in the same product category as the subject.
+- Do NOT recommend: the subject company's existing parent, subsidiary, or obvious partner.
+- FORBIDDEN ACCOUNTS (do not recommend these, or anyone in the same product category as any of these): {{COMPETITORS_TO_EXCLUDE}}
+
+ANTI-GENERIC RULES (failing these = invalid output):
+- Never use the phrases: "focus on," "leverage," "tailor solutions," "target the X market."
+- If a human SDR would have written what you wrote in under 30 seconds, it is too generic.
+
+SPECIFICITY RULES:
+- "why_relevant" must reference something the target company has publicly said, launched, hired for, or announced. BAD: "Large company that could use this." GOOD: "Launched Discovery+ subscription tier in Q3 2025 — currently using Stripe Billing which lacks media-specific revenue recognition."
+- "timing_signal" must be verifiable and dated to at least quarter/year. BAD: "They may need this." GOOD: "Posted 3 Senior Finance roles in Q3 2025 mentioning subscription revenue experience."
+- "approach" must be a specific cold outreach angle a rep could use verbatim today — ideally including a subject line and opening sentence. BAD: "Reach out to finance leaders." GOOD: "Subject: 'Question about Discovery+ revenue rec.' Open: 'Noticed the Q3 subscription tier launch — curious how you're handling deferred revenue across ad-supported and premium tiers.'"
+- "deal_potential_arr" must be justified by headcount × likely seat count or usage tier, not pulled from thin air.
 - Rank by deal potential, highest first.
+
+Generate ONLY real, currently-existing companies. Do not invent.
 
 Return ONLY this JSON array, no preamble:
 
@@ -593,9 +619,17 @@ async def run_pipeline(job_id: str, url: str):
         
         # STEP 6: Target Account Generation
         await update_job_status(job_id, "running", current_step=6)
+        
+        # Build competitor exclusion list
+        competitor_names = [comp.get("name", "") for comp in competitors]
+        competitors_to_exclude = ", ".join(competitor_names)
+        
         step6_context = f"GTM strategy: {json.dumps(strategy, indent=2)}\n\nCompany profile: {json.dumps(company_profile, indent=2)}"
+        # Replace placeholder in prompt
+        step6_prompt = PROMPT_6_TARGET_ACCOUNTS.replace("{{COMPETITORS_TO_EXCLUDE}}", competitors_to_exclude)
+        
         step6_result = await call_openai(
-            PROMPT_6_TARGET_ACCOUNTS,
+            step6_prompt,
             step6_context,
             max_tokens=2000
         )
