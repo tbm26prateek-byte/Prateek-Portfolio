@@ -11,7 +11,7 @@ from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone
 import asyncio
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+from groq import AsyncGroq
 from playwright.async_api import async_playwright
 import json
 import traceback
@@ -25,8 +25,8 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Emergent LLM key
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
+# Groq API key
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -476,32 +476,40 @@ async def scrape_website(url: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
-# OPENAI CALL WRAPPER
+# GROQ API CALL WRAPPER
 # ═══════════════════════════════════════════════════════════════
 
-async def call_openai(prompt: str, context: str, max_tokens: int = 1500, retry_count: int = 0) -> dict:
-    """Call OpenAI via emergentintegrations with retry logic and JSON parsing"""
+async def call_llm(prompt: str, context: str, max_tokens: int = 1500, retry_count: int = 0) -> dict:
+    """Call Groq API with llama-3.3-70b-versatile model"""
     try:
-        logger.info(f"Calling OpenAI via emergentintegrations with max_tokens={max_tokens}")
+        logger.info(f"Calling Groq API (llama-3.3-70b-versatile) with max_tokens={max_tokens}")
         
-        # Create a unique session ID for this call
-        session_id = f"rivaliq_{uuid.uuid4().hex[:8]}"
+        # Initialize Groq client
+        groq_client = AsyncGroq(api_key=GROQ_API_KEY)
         
-        # Initialize LlmChat
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=session_id,
-            system_message=prompt + "\n\nIMPORTANT: You must respond with valid JSON only, no markdown formatting, no code blocks, just raw JSON."
-        ).with_model("openai", "gpt-4o")
+        # Create chat completion
+        chat_completion = await groq_client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": prompt + "\n\nIMPORTANT: You must respond with valid JSON only, no markdown formatting, no code blocks, just raw JSON."
+                },
+                {
+                    "role": "user",
+                    "content": context
+                }
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.7,
+            max_tokens=max_tokens,
+            top_p=1,
+            stream=False
+        )
         
-        # Create user message
-        user_message = UserMessage(text=context)
-        
-        # Send message and get response
-        response_text = await chat.send_message(user_message)
+        # Extract response text
+        response_text = chat_completion.choices[0].message.content.strip()
         
         # Clean response - remove markdown code blocks if present
-        response_text = response_text.strip()
         if response_text.startswith("```json"):
             response_text = response_text[7:]
         if response_text.startswith("```"):
@@ -513,9 +521,9 @@ async def call_openai(prompt: str, context: str, max_tokens: int = 1500, retry_c
         # Parse JSON response
         result_json = json.loads(response_text)
         
-        # Estimate tokens (rough approximation: ~4 chars per token)
-        tokens_used = (len(prompt) + len(context) + len(response_text)) // 4
-        logger.info(f"OpenAI call successful. Estimated tokens used: {tokens_used}")
+        # Get actual token usage from response
+        tokens_used = chat_completion.usage.total_tokens
+        logger.info(f"Groq API call successful. Tokens used: {tokens_used}")
         
         return {
             "data": result_json,
@@ -526,18 +534,22 @@ async def call_openai(prompt: str, context: str, max_tokens: int = 1500, retry_c
         logger.error(f"JSON decode error: {str(e)}")
         logger.error(f"Response text was: {response_text[:500]}")
         if retry_count < 1:
-            logger.info("Retrying OpenAI call due to invalid JSON...")
+            logger.info("Retrying Groq API call due to invalid JSON...")
             await asyncio.sleep(2)
-            return await call_openai(prompt, context, max_tokens, retry_count + 1)
-        raise HTTPException(status_code=500, detail="openai_invalid_json")
-        
+            return await call_llm(prompt, context, max_tokens, retry_count + 1)
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to parse LLM response as JSON after retries: {str(e)}"
+            )
+    
     except Exception as e:
-        logger.error(f"OpenAI call failed: {str(e)}")
-        if retry_count < 1:
-            logger.info("Retrying OpenAI call...")
-            await asyncio.sleep(2)
-            return await call_openai(prompt, context, max_tokens, retry_count + 1)
-        raise HTTPException(status_code=500, detail="openai_timeout")
+        logger.error(f"Groq API call failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"LLM call failed: {str(e)}"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -609,7 +621,7 @@ async def run_pipeline(job_id: str, url: str):
         
         # STEP 2: Company Analysis
         await update_job_status(job_id, "running", current_step=1)
-        step1_result = await call_openai(
+        step1_result = await call_llm(
             PROMPT_1_COMPANY_ANALYSIS,
             f"Website content:\n{scraped_text}",
             max_tokens=500
@@ -620,7 +632,7 @@ async def run_pipeline(job_id: str, url: str):
         
         # STEP 3: Competitor Identification
         await update_job_status(job_id, "running", current_step=2)
-        step2_result = await call_openai(
+        step2_result = await call_llm(
             PROMPT_2_COMPETITOR_ID,
             f"Company profile:\n{json.dumps(company_profile, indent=2)}",
             max_tokens=1000
@@ -632,38 +644,38 @@ async def run_pipeline(job_id: str, url: str):
         # STEP 4: Positioning Comparison
         await update_job_status(job_id, "running", current_step=3)
         step3_context = f"Company profile: {json.dumps(company_profile, indent=2)}\n\nCompetitors: {json.dumps(competitors, indent=2)}"
-        step3_result = await call_openai(
+        step3_result = await call_llm(
             PROMPT_3_POSITIONING,
             step3_context,
             max_tokens=1200
         )
         comparison = step3_result["data"]
         await log_usage(job_id, 3, step3_result["tokens_used"])
-        logger.info(f"Step 3 complete: Positioning comparison done")
+        logger.info("Step 3 complete: Positioning comparison done")
         
         # STEP 5: Gap Identification
         await update_job_status(job_id, "running", current_step=4)
         step4_context = f"Company profile: {json.dumps(company_profile, indent=2)}\n\nCompetitors: {json.dumps(competitors, indent=2)}\n\nPositioning comparison: {json.dumps(comparison, indent=2)}"
-        step4_result = await call_openai(
+        step4_result = await call_llm(
             PROMPT_4_GAP_ID,
             step4_context,
             max_tokens=1200
         )
         gaps = step4_result["data"]
         await log_usage(job_id, 4, step4_result["tokens_used"])
-        logger.info(f"Step 4 complete: Gap analysis done")
+        logger.info("Step 4 complete: Gap analysis done")
         
         # STEP 6: Strategy Engine
         await update_job_status(job_id, "running", current_step=5)
         step5_context = f"Company profile: {json.dumps(company_profile, indent=2)}\n\nGap analysis: {json.dumps(gaps, indent=2)}\n\nPositioning comparison: {json.dumps(comparison, indent=2)}"
-        step5_result = await call_openai(
+        step5_result = await call_llm(
             PROMPT_5_STRATEGY,
             step5_context,
             max_tokens=1500
         )
         strategy = step5_result["data"]
         await log_usage(job_id, 5, step5_result["tokens_used"])
-        logger.info(f"Step 5 complete: Strategy generated")
+        logger.info("Step 5 complete: Strategy generated")
         
         # STEP 6: Target Account Generation
         await update_job_status(job_id, "running", current_step=6)
@@ -676,7 +688,7 @@ async def run_pipeline(job_id: str, url: str):
         # Replace placeholder in prompt
         step6_prompt = PROMPT_6_TARGET_ACCOUNTS.replace("{{COMPETITORS_TO_EXCLUDE}}", competitors_to_exclude)
         
-        step6_result = await call_openai(
+        step6_result = await call_llm(
             step6_prompt,
             step6_context,
             max_tokens=2000
@@ -694,7 +706,7 @@ async def run_pipeline(job_id: str, url: str):
             try:
                 context = f"Subject company profile: {json.dumps(company_profile, indent=2)}\n\nCompetitor to beat: {json.dumps(competitor, indent=2)}\n\nOur GTM strategy: {json.dumps(strategy, indent=2)}"
                 
-                result = await call_openai(
+                result = await call_llm(
                     PROMPT_7_BATTLECARD,
                     context,
                     max_tokens=600
