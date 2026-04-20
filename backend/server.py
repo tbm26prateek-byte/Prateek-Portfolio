@@ -452,8 +452,8 @@ async def scrape_website(url: str) -> str:
                 if pricing_content and len(pricing_content) > 100:
                     combined_text += " PRICING INFORMATION: " + pricing_content
                 
-                # Cap final output at 8000 characters
-                scraped_text = combined_text[:8000]
+                # Cap final output at 10,000 characters
+                scraped_text = combined_text[:10000]
                 
                 if len(scraped_text) < 100:
                     raise Exception("Not enough content scraped (less than 100 characters)")

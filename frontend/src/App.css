@@ -459,7 +459,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none}
 .why-panel{
   margin-top:20px;
   border-top:1px solid rgba(200,196,212,0.15);
-  padding-top:20px;
+  padding:20px 24px;
 }
 .why-panel-header{
   display:flex;
@@ -495,12 +495,11 @@ button{font-family:inherit;cursor:pointer;border:none;background:none}
   opacity:1;
 }
 .why-row{
-  padding:12px 0;
+  padding:16px;
   border-top:1px solid rgba(200,196,212,0.15);
 }
 .why-row:first-child{
   border-top:none;
-  padding-top:0;
 }
 .why-row-top{
   display:flex;
