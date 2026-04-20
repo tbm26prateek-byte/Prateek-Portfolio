@@ -63,7 +63,19 @@ function App() {
     setError(null);
     
     try {
-      const response = await axios.post(`${API}/analyse`, { url: url.trim() });
+      // Smart URL formatting: auto-add https:// if missing
+      let formattedUrl = url.trim();
+      
+      // Remove common issues
+      formattedUrl = formattedUrl.replace(/^(http|https):\/([^\/])/, '$1://$2'); // Fix missing slash after protocol
+      formattedUrl = formattedUrl.replace(/\s+/g, ''); // Remove spaces
+      
+      // Add https:// if no protocol
+      if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
+        formattedUrl = 'https://' + formattedUrl;
+      }
+      
+      const response = await axios.post(`${API}/analyse`, { url: formattedUrl });
       const { job_id } = response.data;
       
       setJobId(job_id);
@@ -88,7 +100,7 @@ function App() {
       if (errorDetail.includes("scrape_failed") || errorDetail.includes("Could not reach")) {
         userMessage = "We couldn't read this URL — it may require a login or block automated access. Try your main public-facing homepage (e.g. yourcompany.com, not app.yourcompany.com).";
       } else if (errorDetail.includes("invalid_url")) {
-        userMessage = "Please enter a valid URL starting with http:// or https://";
+        userMessage = "Please enter a valid website URL (e.g. yourcompany.com)";
       } else if (errorDetail) {
         userMessage = errorDetail;
       }

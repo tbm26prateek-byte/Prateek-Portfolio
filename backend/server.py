@@ -772,12 +772,24 @@ async def run_pipeline(job_id: str, url: str):
 
 @api_router.post("/analyse", response_model=AnalyseResponse)
 async def create_analysis(request: AnalyseRequest, background_tasks: BackgroundTasks):
-    """Trigger the 6-step analysis pipeline"""
+    """Trigger the 7-step analysis pipeline"""
     
-    # Validate URL
+    # Smart URL formatting: auto-correct common issues
     url = request.url.strip()
+    
+    # Fix missing slash after protocol (e.g., "http:/example.com" → "http://example.com")
+    url = url.replace('http:/', 'http://').replace('https:/', 'https://')
+    
+    # Remove extra spaces
+    url = url.replace(' ', '')
+    
+    # Add https:// if no protocol specified
     if not url.startswith("http://") and not url.startswith("https://"):
-        raise HTTPException(status_code=400, detail="invalid_url: URL must include http:// or https://")
+        url = "https://" + url
+    
+    # Basic URL validation (check if it has a domain)
+    if '.' not in url or len(url) < 10:
+        raise HTTPException(status_code=400, detail="invalid_url: Please enter a valid website URL")
     
     # Create job
     job_id = f"job_{uuid.uuid4().hex[:12]}"
