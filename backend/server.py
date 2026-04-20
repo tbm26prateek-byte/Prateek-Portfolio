@@ -207,6 +207,15 @@ SPECIFICITY FLOOR:
 
 Before outputting, ask yourself: "Could this output apply to 100 different SaaS companies, or just this one?" If it could apply to many, rewrite until it could only apply to this one.
 
+Also return:
+- market_gap_score (1–10): how large and underserved the identified gap is
+- execution_ease_score (1–10): how achievable the strategy is within 90 days
+- competitive_space_score (1–10): how little entrenched competition exists
+- why_this_segment: exactly 4 decision drivers with signal levels (HIGH/MEDIUM/LOW) and one specific, commercially grounded explanation each
+- why_not_others: exactly 3 rejected segment alternatives with sharp one-sentence reasons why they were deprioritised
+
+All scores must be logically derived from the gap analysis and competitive landscape — not random. If the opportunity is strong across all three dimensions, scores should reflect that. If execution is difficult, score it honestly.
+
 Return ONLY this JSON, no preamble:
 
 {
@@ -233,7 +242,46 @@ Return ONLY this JSON, no preamble:
     { "priority": 4, "action": "", "expected_outcome": "" },
     { "priority": 5, "action": "", "expected_outcome": "" }
   ],
-  "confidence": 0
+  "confidence": 0,
+  "market_gap_score": 0,
+  "execution_ease_score": 0,
+  "competitive_space_score": 0,
+  "why_this_segment": [
+    {
+      "driver": "",
+      "signal_level": "HIGH",
+      "explanation": ""
+    },
+    {
+      "driver": "",
+      "signal_level": "MEDIUM",
+      "explanation": ""
+    },
+    {
+      "driver": "",
+      "signal_level": "HIGH",
+      "explanation": ""
+    },
+    {
+      "driver": "",
+      "signal_level": "LOW",
+      "explanation": ""
+    }
+  ],
+  "why_not_others": [
+    {
+      "segment": "",
+      "reason": ""
+    },
+    {
+      "segment": "",
+      "reason": ""
+    },
+    {
+      "segment": "",
+      "reason": ""
+    }
+  ]
 }"""
 
 PROMPT_6_TARGET_ACCOUNTS = """You are a B2B sales strategist. Based on the GTM strategy provided, identify exactly 5 real, named target companies to pursue this week.

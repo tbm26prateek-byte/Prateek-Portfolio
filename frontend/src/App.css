@@ -356,3 +356,229 @@ button{font-family:inherit;cursor:pointer;border:none;background:none}
   .tabs{overflow-x:auto}
   .tab{padding:10px 14px;font-size:12px;white-space:nowrap}
 }
+
+
+/* ─── POSITIONING STATEMENT CALLOUT ─────────────────────────────── */
+.positioning-callout{
+  background:#eeedfe;
+  border-left:2px solid var(--primary);
+  padding:16px 20px;
+  margin-bottom:20px;
+}
+.positioning-label{
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:0.14em;
+  text-transform:uppercase;
+  color:var(--primary);
+  margin-bottom:6px;
+}
+.positioning-text{
+  font-size:15px;
+  font-weight:600;
+  color:var(--ink);
+  line-height:1.5;
+}
+
+/* ─── DECISION CONFIDENCE BLOCK ─────────────────────────────── */
+.decision-confidence{
+  text-align:right;
+  min-width:200px;
+}
+.decision-conf-label{
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:0.12em;
+  color:var(--ink-4);
+  margin-bottom:6px;
+}
+.decision-conf-score{
+  margin-bottom:14px;
+}
+.conf-num{
+  font-family:var(--mono);
+  font-size:32px;
+  font-weight:500;
+  color:#fff;
+}
+.conf-suffix{
+  font-family:var(--mono);
+  font-size:14px;
+  color:var(--ink-4);
+  margin-left:2px;
+}
+.confidence-bars{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.conf-bar-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.conf-bar-label{
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:0.05em;
+  color:var(--ink-4);
+  text-transform:uppercase;
+  min-width:130px;
+  text-align:left;
+}
+.conf-bar-track{
+  flex:1;
+  height:4px;
+  background:var(--dark-3);
+  border-radius:2px;
+  overflow:hidden;
+  position:relative;
+}
+.conf-bar-fill{
+  position:absolute;
+  left:0;
+  top:0;
+  height:100%;
+  background:var(--primary);
+  animation:barFill 600ms ease-out forwards;
+  transform-origin:left;
+}
+@keyframes barFill{
+  from{transform:scaleX(0)}
+  to{transform:scaleX(1)}
+}
+.conf-bar-score{
+  font-family:var(--mono);
+  font-size:11px;
+  color:#fff;
+  min-width:32px;
+  text-align:right;
+}
+
+/* ─── WHY PANELS (RECOMMENDATION & NOT OTHERS) ─────────────────────────────── */
+.why-panel{
+  margin-top:20px;
+  border-top:1px solid rgba(200,196,212,0.15);
+  padding-top:20px;
+}
+.why-panel-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  cursor:pointer;
+  user-select:none;
+  margin-bottom:14px;
+}
+.why-panel-title{
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:0.14em;
+  text-transform:uppercase;
+  color:var(--ink-4);
+}
+.why-chevron{
+  font-family:var(--mono);
+  font-size:16px;
+  color:var(--ink-4);
+  font-weight:300;
+}
+.why-panel-content{
+  display:grid;
+  gap:12px;
+  max-height:0;
+  overflow:hidden;
+  opacity:0;
+  transition:max-height 250ms ease,opacity 250ms ease;
+}
+.why-panel-content.expanded{
+  max-height:1000px;
+  opacity:1;
+}
+.why-row{
+  padding:12px 0;
+  border-top:1px solid rgba(200,196,212,0.15);
+}
+.why-row:first-child{
+  border-top:none;
+  padding-top:0;
+}
+.why-row-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:6px;
+}
+.why-driver{
+  font-size:13px;
+  font-weight:500;
+  color:#fff;
+}
+.signal-badge{
+  font-family:var(--mono);
+  font-size:9px;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  padding:3px 8px;
+  border-radius:4px;
+  font-weight:500;
+}
+.signal-badge.signal-high{
+  background:rgba(0,110,32,0.15);
+  color:#5DCAA5;
+}
+.signal-badge.signal-medium{
+  background:rgba(87,78,177,0.15);
+  color:var(--primary-light);
+}
+.signal-badge.signal-low{
+  background:rgba(186,26,26,0.15);
+  color:#E57373;
+}
+.why-explanation{
+  font-size:12px;
+  color:var(--ink-4);
+  line-height:1.6;
+}
+.why-not-segment{
+  font-family:var(--mono);
+  font-size:11px;
+  font-weight:500;
+  color:var(--ink-4);
+  text-decoration:line-through;
+  margin-bottom:6px;
+  opacity:0.7;
+}
+.why-not-reason{
+  font-size:12px;
+  color:var(--ink-4);
+  line-height:1.6;
+}
+
+/* ─── SIGNAL SOURCES (TARGET ACCOUNTS) ─────────────────────────────── */
+.signal-sources{
+  margin-top:12px;
+  padding-top:12px;
+  border-top:1px solid var(--line);
+}
+.signal-sources-label{
+  font-family:var(--mono);
+  font-size:9px;
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+  color:var(--ink-3);
+  margin-bottom:6px;
+}
+.signal-sources-tags{
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
+}
+.signal-tag{
+  font-family:var(--mono);
+  font-size:9px;
+  background:var(--bg-low);
+  color:var(--ink-3);
+  padding:2px 8px;
+  border-radius:0.25rem;
+  letter-spacing:0.05em;
+}

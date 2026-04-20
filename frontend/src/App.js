@@ -620,9 +620,9 @@ function ResultsScreen({ result, activeTab, switchTab, goHome, exportPDF, openBa
 
       <div className="tabs">
         <button className={`tab ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => switchTab('overview')}>Overview</button>
-        <button className={`tab ${activeTab === 'competitors' ? 'active' : ''}`} onClick={() => switchTab('competitors')}>Competitors</button>
+        <button className={`tab ${activeTab === 'competitors' ? 'active' : ''}`} onClick={() => switchTab('competitors')}>Competitive Landscape</button>
         <button className={`tab ${activeTab === 'strategy' ? 'active' : ''}`} onClick={() => switchTab('strategy')}>Strategy</button>
-        <button className={`tab ${activeTab === 'accounts' ? 'active' : ''}`} onClick={() => switchTab('accounts')}>Accounts</button>
+        <button className={`tab ${activeTab === 'accounts' ? 'active' : ''}`} onClick={() => switchTab('accounts')}>Priority Accounts</button>
       </div>
 
       {activeTab === 'overview' && <OverviewTab result={result} />}
@@ -665,7 +665,7 @@ function OverviewTab({ result }) {
       </div>
 
       <div className="block">
-        <div className="block-head"><div className="label">Strategic gaps</div></div>
+        <div className="block-head"><div className="label">Where the Market is Open</div></div>
         <div className="gaps">
           <div className="gap gap-weak">
             <div className="gap-icon">⚠</div>
@@ -794,39 +794,79 @@ function StrategyTab({ result }) {
 function AccountsTab({ result }) {
   const accounts = result.target_accounts || [];
   
+  // Helper function to extract signal sources from timing_signal text
+  const getSignalSources = (timingSignal) => {
+    if (!timingSignal) return [];
+    const sources = [];
+    const text = timingSignal.toLowerCase();
+    
+    if (text.includes('hiring') || text.includes('roles') || text.includes('headcount') || text.includes('posted')) {
+      sources.push('LinkedIn Hiring');
+    }
+    if (text.includes('funding') || text.includes('raised') || text.includes('round') || text.includes('million')) {
+      sources.push('Funding Round');
+    }
+    if (text.includes('expansion') || text.includes('market') || text.includes('city') || text.includes('country') || text.includes('geographic')) {
+      sources.push('Geographic Expansion');
+    }
+    if (text.includes('churn') || text.includes('tool') || text.includes('replacing') || text.includes('failed') || text.includes('switching')) {
+      sources.push('Tool Displacement');
+    }
+    if (text.includes('announcement') || text.includes('launch') || text.includes('post') || text.includes('public') || text.includes('announced') || text.includes('broadcasted')) {
+      sources.push('Public Signal');
+    }
+    
+    return sources.slice(0, 3); // Max 3 tags
+  };
+  
   return (
     <div className="block">
       <div className="block-head">
-        <div className="label">Target accounts · {accounts.length} identified</div>
+        <div className="label">Priority Accounts · {accounts.length} identified</div>
         <div className="mono" style={{fontSize:'10px',color:'var(--ink-3)',letterSpacing:'0.05em'}}>RANKED BY DEAL POTENTIAL</div>
       </div>
       <div className="accounts">
-        {accounts.map((a, i) => (
-          <div key={i} className="account">
-            <div className="account-top">
-              <div>
-                <div className="account-name serif">{a.company}</div>
-                <div className="account-geo">{a.country}</div>
+        {accounts.map((a, i) => {
+          const signalSources = getSignalSources(a.timing_signal);
+          
+          return (
+            <div key={i} className="account">
+              <div className="account-top">
+                <div>
+                  <div className="account-name serif">{a.company}</div>
+                  <div className="account-geo">{a.country}</div>
+                </div>
+                <div className="account-arr">{a.deal_potential_arr}</div>
               </div>
-              <div className="account-arr">{a.deal_potential_arr}</div>
+              <div className="account-why">{a.why_relevant}</div>
+              <div className="account-grid">
+                <div className="account-meta">
+                  <div className="account-meta-key">Risk</div>
+                  <div className="account-meta-val">{a.risk}</div>
+                </div>
+                <div className="account-meta">
+                  <div className="account-meta-key">Approach</div>
+                  <div className="account-meta-val">{a.approach}</div>
+                </div>
+                <div className="account-meta signal">
+                  <div className="account-meta-key">◆ Timing signal</div>
+                  <div className="account-meta-val">{a.timing_signal}</div>
+                </div>
+              </div>
+              {/* Signal Sources */}
+              {signalSources.length > 0 && (
+                <div className="signal-sources">
+                  <div className="signal-sources-label">SIGNAL SOURCES</div>
+                  <div className="signal-sources-tags">
+                    {signalSources.map((source, idx) => (
+                      <span key={idx} className="signal-tag">{source}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="account-why">{a.why_relevant}</div>
-            <div className="account-grid">
-              <div className="account-meta">
-                <div className="account-meta-key">Risk</div>
-                <div className="account-meta-val">{a.risk}</div>
-              </div>
-              <div className="account-meta">
-                <div className="account-meta-key">Approach</div>
-                <div className="account-meta-val">{a.approach}</div>
-              </div>
-              <div className="account-meta signal">
-                <div className="account-meta-key">◆ Timing signal</div>
-                <div className="account-meta-val">{a.timing_signal}</div>
-              </div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -837,21 +877,66 @@ function AccountsTab({ result }) {
 // ═══════════════════════════════════════════════════
 function StrategyCard({ strategy, compact }) {
   const s = strategy || {};
+  const [whyExpanded, setWhyExpanded] = useState(true);
+  const [whyNotExpanded, setWhyNotExpanded] = useState(false);
   const wherePlay = `${s.where_to_play?.segment || ''}, ${s.where_to_play?.geography || ''}`;
+  
+  // Calculate weighted confidence from scores
+  const marketGap = s.market_gap_score || 0;
+  const executionEase = s.execution_ease_score || 0;
+  const competitiveSpace = s.competitive_space_score || 0;
+  const weightedConfidence = Math.round((marketGap * 0.4 + executionEase * 0.3 + competitiveSpace * 0.3) * 10);
   
   if (compact) {
     return (
       <div className="strat-card">
+        {/* Positioning Statement Callout */}
+        {s.how_to_win?.positioning_statement && (
+          <div className="positioning-callout">
+            <div className="positioning-label">POSITIONING STATEMENT</div>
+            <div className="positioning-text">{s.how_to_win.positioning_statement}</div>
+          </div>
+        )}
+        
         <div className="strat-top">
           <div>
             <div className="strat-stamp">THE DECISION · STRATEGY ENGINE V1</div>
-            <div className="strat-heading serif">Your GTM call.</div>
+            <div className="strat-heading serif">Recommended Strategic Move</div>
           </div>
-          <div className="strat-conf">
-            <div className="strat-conf-lbl">CONFIDENCE</div>
-            <div className="strat-conf-val">{s.confidence || 0}%</div>
+          
+          {/* Decision Confidence Block */}
+          <div className="decision-confidence">
+            <div className="decision-conf-label">DECISION CONFIDENCE</div>
+            <div className="decision-conf-score">
+              <span className="conf-num">{weightedConfidence}</span>
+              <span className="conf-suffix">/100</span>
+            </div>
+            <div className="confidence-bars">
+              <div className="conf-bar-row">
+                <span className="conf-bar-label">MARKET GAP</span>
+                <div className="conf-bar-track">
+                  <div className="conf-bar-fill" style={{width: `${marketGap * 10}%`}}></div>
+                </div>
+                <span className="conf-bar-score">{marketGap}/10</span>
+              </div>
+              <div className="conf-bar-row">
+                <span className="conf-bar-label">EXECUTION EASE</span>
+                <div className="conf-bar-track">
+                  <div className="conf-bar-fill" style={{width: `${executionEase * 10}%`}}></div>
+                </div>
+                <span className="conf-bar-score">{executionEase}/10</span>
+              </div>
+              <div className="conf-bar-row">
+                <span className="conf-bar-label">COMPETITIVE SPACE</span>
+                <div className="conf-bar-track">
+                  <div className="conf-bar-fill" style={{width: `${competitiveSpace * 10}%`}}></div>
+                </div>
+                <span className="conf-bar-score">{competitiveSpace}/10</span>
+              </div>
+            </div>
           </div>
         </div>
+        
         <div className="strat-row">
           <div className="strat-key">WHERE TO PLAY</div>
           <div>
@@ -859,15 +944,58 @@ function StrategyCard({ strategy, compact }) {
             <div className="strat-why">{s.where_to_play?.why || '—'}</div>
           </div>
         </div>
+        
         <div className="strat-row">
-          <div className="strat-key">HOW TO WIN</div>
+          <div className="strat-key">WINNING POSITIONING</div>
           <div>
             <div className="strat-val serif">{s.how_to_win?.differentiation || '—'}</div>
-            <div className="strat-why">"{s.how_to_win?.positioning_statement || '—'}"</div>
+            <div className="strat-why">Core Tactic: {s.how_to_win?.core_tactic || '—'}</div>
           </div>
         </div>
+        
+        {/* Why This Recommendation Panel */}
+        {s.why_this_segment && s.why_this_segment.length > 0 && (
+          <div className="why-panel">
+            <div className="why-panel-header" onClick={() => setWhyExpanded(!whyExpanded)}>
+              <span className="why-panel-title">WHY THIS RECOMMENDATION</span>
+              <span className="why-chevron">{whyExpanded ? '−' : '+'}</span>
+            </div>
+            <div className={`why-panel-content ${whyExpanded ? 'expanded' : ''}`}>
+              {s.why_this_segment.map((item, i) => (
+                <div key={i} className="why-row">
+                  <div className="why-row-top">
+                    <span className="why-driver">{item.driver}</span>
+                    <span className={`signal-badge signal-${item.signal_level.toLowerCase()}`}>
+                      {item.signal_level}
+                    </span>
+                  </div>
+                  <div className="why-explanation">{item.explanation}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {/* Why Not Other Options */}
+        {s.why_not_others && s.why_not_others.length > 0 && (
+          <div className="why-panel">
+            <div className="why-panel-header" onClick={() => setWhyNotExpanded(!whyNotExpanded)}>
+              <span className="why-panel-title">WHY NOT OTHER OPTIONS</span>
+              <span className="why-chevron">{whyNotExpanded ? '−' : '+'}</span>
+            </div>
+            <div className={`why-panel-content ${whyNotExpanded ? 'expanded' : ''}`}>
+              {s.why_not_others.map((item, i) => (
+                <div key={i} className="why-row">
+                  <div className="why-not-segment">{item.segment}</div>
+                  <div className="why-not-reason">{item.reason}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
         <div className="strat-actions">
-          <div className="strat-actions-head">◆ 90-DAY ACTION PLAN</div>
+          <div className="strat-actions-head">◆ FIRST 90 DAYS OF EXECUTION</div>
           <div className="strat-actions-grid">
             {s.ninety_day_actions?.map((a, i) => (
               <div key={i} className="strat-action">
@@ -883,16 +1011,53 @@ function StrategyCard({ strategy, compact }) {
   
   return (
     <div className="strat-card">
+      {/* Positioning Statement Callout */}
+      {s.how_to_win?.positioning_statement && (
+        <div className="positioning-callout">
+          <div className="positioning-label">POSITIONING STATEMENT</div>
+          <div className="positioning-text">{s.how_to_win.positioning_statement}</div>
+        </div>
+      )}
+      
       <div className="strat-top">
         <div>
           <div className="strat-stamp">THE DECISION · FULL STRATEGY</div>
-          <div className="strat-heading serif">Your complete GTM playbook.</div>
+          <div className="strat-heading serif">Recommended Strategic Move</div>
         </div>
-        <div className="strat-conf">
-          <div className="strat-conf-lbl">CONFIDENCE</div>
-          <div className="strat-conf-val">{s.confidence || 0}%</div>
+        
+        {/* Decision Confidence Block */}
+        <div className="decision-confidence">
+          <div className="decision-conf-label">DECISION CONFIDENCE</div>
+          <div className="decision-conf-score">
+            <span className="conf-num">{weightedConfidence}</span>
+            <span className="conf-suffix">/100</span>
+          </div>
+          <div className="confidence-bars">
+            <div className="conf-bar-row">
+              <span className="conf-bar-label">MARKET GAP</span>
+              <div className="conf-bar-track">
+                <div className="conf-bar-fill" style={{width: `${marketGap * 10}%`}}></div>
+              </div>
+              <span className="conf-bar-score">{marketGap}/10</span>
+            </div>
+            <div className="conf-bar-row">
+              <span className="conf-bar-label">EXECUTION EASE</span>
+              <div className="conf-bar-track">
+                <div className="conf-bar-fill" style={{width: `${executionEase * 10}%`}}></div>
+              </div>
+              <span className="conf-bar-score">{executionEase}/10</span>
+            </div>
+            <div className="conf-bar-row">
+              <span className="conf-bar-label">COMPETITIVE SPACE</span>
+              <div className="conf-bar-track">
+                <div className="conf-bar-fill" style={{width: `${competitiveSpace * 10}%`}}></div>
+              </div>
+              <span className="conf-bar-score">{competitiveSpace}/10</span>
+            </div>
+          </div>
         </div>
       </div>
+      
       <div className="strat-row">
         <div className="strat-key">SEGMENT</div>
         <div>
@@ -908,10 +1073,9 @@ function StrategyCard({ strategy, compact }) {
         </div>
       </div>
       <div className="strat-row">
-        <div className="strat-key">HOW TO WIN</div>
+        <div className="strat-key">WINNING POSITIONING</div>
         <div>
           <div className="strat-val serif">{s.how_to_win?.differentiation || '—'}</div>
-          <div className="strat-why">"{s.how_to_win?.positioning_statement || '—'}"</div>
         </div>
       </div>
       <div className="strat-row">
@@ -921,8 +1085,50 @@ function StrategyCard({ strategy, compact }) {
           <div className="strat-why">{s.pricing_recommendation?.rationale || '—'}</div>
         </div>
       </div>
+      
+      {/* Why This Recommendation Panel */}
+      {s.why_this_segment && s.why_this_segment.length > 0 && (
+        <div className="why-panel">
+          <div className="why-panel-header" onClick={() => setWhyExpanded(!whyExpanded)}>
+            <span className="why-panel-title">WHY THIS RECOMMENDATION</span>
+            <span className="why-chevron">{whyExpanded ? '−' : '+'}</span>
+          </div>
+          <div className={`why-panel-content ${whyExpanded ? 'expanded' : ''}`}>
+            {s.why_this_segment.map((item, i) => (
+              <div key={i} className="why-row">
+                <div className="why-row-top">
+                  <span className="why-driver">{item.driver}</span>
+                  <span className={`signal-badge signal-${item.signal_level.toLowerCase()}`}>
+                    {item.signal_level}
+                  </span>
+                </div>
+                <div className="why-explanation">{item.explanation}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {/* Why Not Other Options */}
+      {s.why_not_others && s.why_not_others.length > 0 && (
+        <div className="why-panel">
+          <div className="why-panel-header" onClick={() => setWhyNotExpanded(!whyNotExpanded)}>
+            <span className="why-panel-title">WHY NOT OTHER OPTIONS</span>
+            <span className="why-chevron">{whyNotExpanded ? '−' : '+'}</span>
+          </div>
+          <div className={`why-panel-content ${whyNotExpanded ? 'expanded' : ''}`}>
+            {s.why_not_others.map((item, i) => (
+              <div key={i} className="why-row">
+                <div className="why-not-segment">{item.segment}</div>
+                <div className="why-not-reason">{item.reason}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
       <div className="strat-actions">
-        <div className="strat-actions-head">◆ 90-DAY ACTION PLAN</div>
+        <div className="strat-actions-head">◆ FIRST 90 DAYS OF EXECUTION</div>
         <div className="strat-actions-grid">
           {s.ninety_day_actions?.map((a, i) => (
             <div key={i} className="strat-action">
